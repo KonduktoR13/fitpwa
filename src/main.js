@@ -1,7 +1,7 @@
 import "./styles.css";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
-const DATA_VERSION = 3;
+const DATA_VERSION = 4;
 const categories = [
   ["push", "Жим"],
   ["pull", "Тяга"],
@@ -35,7 +35,7 @@ const seedExercises = [
   ["Разведения гантелей в стороны", "pull", "dumbbell", "↔️"],
   ["Бицепс с гантелями", "pull", "dumbbell", "💪"],
   ["Face pull", "pull", "cable", "🎯"],
-  ["Гребля 3000 м", "cardio", "cardio", "🚣"]
+  ["Гребля", "cardio", "cardio", "🚣"]
 ];
 
 let state = loadState();
@@ -98,7 +98,7 @@ function migrateState(input) {
   migrated.settings = { unit: "кг", autoUpdateCheck: true, ...(input.settings || {}) };
   migrated.exercises = (input.exercises || []).map((exercise) => ({
     id: exercise.id || uid(),
-    name: exercise.name || "Упражнение",
+    name: exercise.name === "Гребля 3000 м" ? "Гребля" : exercise.name || "Упражнение",
     category: exercise.category || "other",
     equipmentType: exercise.equipmentType || "other",
     icon: exercise.icon || "🏋️",
@@ -108,7 +108,7 @@ function migrateState(input) {
   if (!migrated.exercises.some((exercise) => isRowingExercise(exercise))) {
     migrated.exercises.push({
       id: uid(),
-      name: "Гребля 3000 м",
+      name: "Гребля",
       category: "cardio",
       equipmentType: "cardio",
       icon: "🚣",
@@ -708,7 +708,7 @@ function renderCardioEntry(exercise, editingSet) {
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="cardio">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование кардио</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
       <div class="quick-row">
-        ${rowing ? `<button type="button" data-action="cardio-distance" data-distance="3">3000 м</button><button type="button" data-action="cardio-setting" data-setting="9">Заслонка 9</button>` : ""}
+        ${rowing ? `<button type="button" data-action="cardio-distance" data-distance="3">3000 м тест</button><button type="button" data-action="cardio-setting" data-setting="9">Заслонка 9</button>` : ""}
         ${elliptical ? `<button type="button" data-action="cardio-duration" data-duration="8">8 мин разогрев</button>` : ""}
         <button type="button" data-action="cardio-duration" data-duration="10">10 мин</button>
         <button type="button" data-action="cardio-duration" data-duration="20">20 мин</button>
@@ -719,7 +719,7 @@ function renderCardioEntry(exercise, editingSet) {
       </div>
       <label class="number-control cardio-setting"><span>Настройка тренажёра</span><input inputmode="decimal" name="setting" value="${values.setting || ""}" placeholder="например 9" /></label>
       <div class="cardio-context">
-        ${rowing ? `<strong>Гребля: цель фит-теста 3000 м</strong><span>${rowNormsText()}</span><span>Заслонка/настройка сохраняется как контекст и не влияет на индекс.</span>` : ""}
+        ${rowing ? `<strong>Гребля</strong><span>3000 м - быстрый пресет для рабочего фит-теста, обычные тренировки можно писать с любой дистанцией.</span><span>${rowNormsText()}</span><span>Заслонка/настройка сохраняется как контекст и не влияет на индекс.</span>` : ""}
         ${elliptical ? `<strong>Эллипс: спокойное кардио</strong><span>Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.</span>` : ""}
         ${!rowing && !elliptical ? `<span>Настройка сохраняется как контекст. Она не считается сложностью и не влияет на прогресс.</span>` : ""}
       </div>
