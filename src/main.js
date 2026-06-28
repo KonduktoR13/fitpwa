@@ -45,6 +45,7 @@ let activeSetField = "weight";
 let nativeKeyboard = false;
 let editingSetId = null;
 let lastTouchedSetId = null;
+let waitingServiceWorker = null;
 
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -797,7 +798,52 @@ document.addEventListener("click", async (event) => {
 window.addEventListener("resize", drawCharts);
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js"));
+  window.addEventListener("load", registerServiceWorker);
 }
 
 render();
+
+async function registerServiceWorker() {
+  const registration = await navigator.serviceWorker.register("./sw.js");
+
+  if (registration.waiting) {
+    showUpdatePrompt(registration.waiting);
+  }
+
+  registration.addEventListener("updatefound", () => {
+    const worker = registration.installing;
+    if (!worker) return;
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "installed" && navigator.serviceWorker.controller) {
+        showUpdatePrompt(worker);
+      }
+    });
+  });
+
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+
+  setInterval(() => registration.update(), 60_000);
+}
+
+function showUpdatePrompt(worker) {
+  waitingServiceWorker = worker;
+  let prompt = document.querySelector(".update-prompt");
+  if (!prompt) {
+    prompt = document.createElement("div");
+    prompt.className = "update-prompt";
+    prompt.innerHTML = `
+      <span>Доступна новая версия</span>
+      <button type="button">Обновить</button>
+    `;
+    document.body.append(prompt);
+    prompt.querySelector("button").addEventListener("click", () => {
+      waitingServiceWorker?.postMessage({ type: "SKIP_WAITING" });
+    });
+  }
+  prompt.hidden = false;
+}

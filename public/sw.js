@@ -1,4 +1,4 @@
-const CACHE_NAME = "training-log-pwa-v1";
+const CACHE_NAME = "training-log-pwa-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,7 +8,12 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (event) => {
@@ -22,14 +27,41 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      });
-    })
-  );
+
+  const request = event.request;
+  const url = new URL(request.url);
+  const isNavigation = request.mode === "navigate";
+  const isHashedAsset = url.pathname.includes("/assets/");
+
+  if (isNavigation) {
+    event.respondWith(networkFirst(request, "./index.html"));
+    return;
+  }
+
+  if (isHashedAsset) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+
+  event.respondWith(networkFirst(request));
 });
+
+async function networkFirst(request, fallbackUrl) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    cache.put(request, response.clone());
+    return response;
+  } catch {
+    return (await caches.match(request)) || (fallbackUrl ? caches.match(fallbackUrl) : undefined) || Response.error();
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  const cache = await caches.open(CACHE_NAME);
+  cache.put(request, response.clone());
+  return response;
+}

@@ -591,6 +591,33 @@ h3 {
   background: var(--text);
 }
 
+.update-prompt {
+  position: fixed;
+  right: max(12px, calc((100vw - 1120px) / 2 + 16px));
+  bottom: 88px;
+  left: max(12px, calc((100vw - 1120px) / 2 + 16px));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 38%, var(--line));
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--primary-dark);
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.update-prompt button {
+  min-height: 36px;
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+  font-weight: 800;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding-inline: 12px;
@@ -644,6 +671,11 @@ h3 {
   }
 
   .bottom-nav {
+    right: 12px;
+    left: 12px;
+  }
+
+  .update-prompt {
     right: 12px;
     left: 12px;
   }
