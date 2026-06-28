@@ -1,7 +1,7 @@
 import "./styles.css";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
-const DATA_VERSION = 2;
+const DATA_VERSION = 3;
 const categories = [
   ["push", "Жим"],
   ["pull", "Тяга"],
@@ -34,7 +34,8 @@ const seedExercises = [
   ["Тяга гантели в наклоне", "pull", "dumbbell", "↙️"],
   ["Разведения гантелей в стороны", "pull", "dumbbell", "↔️"],
   ["Бицепс с гантелями", "pull", "dumbbell", "💪"],
-  ["Face pull", "pull", "cable", "🎯"]
+  ["Face pull", "pull", "cable", "🎯"],
+  ["Гребля 3000 м", "cardio", "cardio", "🚣"]
 ];
 
 let state = loadState();
@@ -104,6 +105,17 @@ function migrateState(input) {
     image: exercise.image || "",
     createdAt: exercise.createdAt || Date.now()
   }));
+  if (!migrated.exercises.some((exercise) => isRowingExercise(exercise))) {
+    migrated.exercises.push({
+      id: uid(),
+      name: "Гребля 3000 м",
+      category: "cardio",
+      equipmentType: "cardio",
+      icon: "🚣",
+      image: "",
+      createdAt: Date.now()
+    });
+  }
   migrated.sets = (input.sets || [])
     .filter((set) => {
       const cardio = set.type === "cardio" || set.durationMin != null || set.distanceKm != null;
@@ -554,9 +566,9 @@ function renderHome() {
     <section class="exercise-groups">
       ${grouped
         .filter(([, , items]) => items.length)
-        .map(([, title, items]) => `
-          <div class="group">
-            <h2>${title}</h2>
+        .map(([key, title, items]) => `
+          <div class="group ${key === "cardio" ? "cardio-group" : ""}">
+            <div class="group-title"><h2>${title}</h2><span>${items.length}</span></div>
             <div class="exercise-list">
               ${items.map(renderExerciseCard).join("")}
             </div>
