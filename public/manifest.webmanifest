@@ -1,0 +1,19 @@
+{
+  "name": "Силовой журнал",
+  "short_name": "Журнал",
+  "description": "PWA для ручного учета упражнений, подходов и прогресса",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f7f2",
+  "theme_color": "#f4f7f2",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
