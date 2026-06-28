@@ -628,13 +628,18 @@ h3 {
   line-height: 0.95;
 }
 
+.progress-picker-shell {
+  position: relative;
+  margin-top: 4px;
+}
+
 .progress-picker {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(180px, 240px);
   gap: 10px;
   overflow-x: auto;
-  padding: 4px 0 12px;
+  padding: 8px 0 12px;
   scrollbar-width: thin;
 }
 
@@ -802,24 +807,8 @@ h3 {
 .history-exercise {
   display: grid;
   gap: 12px;
-  min-width: min(320px, 82vw);
   border-left: 3px solid color-mix(in srgb, var(--primary) 38%, var(--line));
   padding-left: 10px;
-}
-
-.history-exercise-strip {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(260px, 340px);
-  gap: 12px;
-  overflow-x: auto;
-  padding: 4px 2px 10px;
-  scroll-snap-type: x proximity;
-  scrollbar-width: thin;
-}
-
-.history-exercise-strip .history-exercise {
-  scroll-snap-align: start;
 }
 
 .modal-backdrop {
@@ -1043,10 +1032,6 @@ h3 {
   .session-summary div:last-child {
     justify-items: start;
     text-align: left;
-  }
-
-  .history-exercise-strip {
-    grid-auto-columns: minmax(248px, 86vw);
   }
 
   .form-grid {

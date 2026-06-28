@@ -725,19 +725,22 @@ function renderProgress(selectedId) {
         <small>${last && previous ? trendText(last.score, previous.score) : "Нужна ещё одна точка"}</small>
       </div>
     </section>
-    <section class="progress-picker">
-      ${tracked.map(({ exercise, sessions: itemSessions }) => {
-        const itemLast = itemSessions.at(-1);
-        const itemPrev = itemSessions.at(-2);
-        const delta = itemLast && itemPrev ? itemLast.score - itemPrev.score : null;
-        return `
-          <button class="${exercise.id === selected.id ? "active" : ""}" data-action="select-progress-card" data-id="${exercise.id}">
-            <span>${exercise.name}</span>
-            <strong>${itemLast ? formatWeight(itemLast.score) : "—"}</strong>
-            <small>${delta == null ? `${itemSessions.length} трен.` : trendText(itemLast.score, itemPrev.score)}</small>
-          </button>
-        `;
-      }).join("")}
+    <section class="progress-picker-shell">
+      <div class="section-head"><h2>Выбор упражнения</h2><span class="legend-dot">${tracked.length} с историей</span></div>
+      <div class="progress-picker">
+        ${tracked.map(({ exercise, sessions: itemSessions }) => {
+          const itemLast = itemSessions.at(-1);
+          const itemPrev = itemSessions.at(-2);
+          const delta = itemLast && itemPrev ? itemLast.score - itemPrev.score : null;
+          return `
+            <button class="${exercise.id === selected.id ? "active" : ""}" data-action="select-progress-card" data-id="${exercise.id}">
+              <span>${exercise.name}</span>
+              <strong>${itemLast ? formatWeight(itemLast.score) : "—"}</strong>
+              <small>${delta == null ? `${itemSessions.length} трен.` : trendText(itemLast.score, itemPrev.score)}</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
     </section>
     <section class="progress-mosaic">
       <div class="metric-tile strength"><span>Сила</span><strong>${last ? `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>оценочный 1ПМ</p></div>
@@ -865,7 +868,7 @@ function renderHistoryDay(key, items) {
         <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт</small></span>
         <span>${expanded ? "Свернуть" : "Открыть"}</span>
       </button>
-      ${expanded ? `<div class="history-exercise-strip">${exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
+      ${expanded ? exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
         const exerciseKey = `${key}:${exerciseId}`;
         const exerciseExpanded = expandedHistoryExercises.has(exerciseKey);
         return `
@@ -877,7 +880,7 @@ function renderHistoryDay(key, items) {
             ${exerciseExpanded ? `<div class="sets-list">${sets.map(renderSetRow).join("")}</div>` : ""}
           </article>
         `;
-      }).join("")}</div>` : ""}
+      }).join("") : ""}
     </section>
   `;
 }
