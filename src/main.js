@@ -52,6 +52,7 @@ let serviceWorkerRegistration = null;
 let historyCursor = new Date();
 let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
+let chartTooltip = null;
 
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -264,6 +265,30 @@ function trackedExercises() {
     .map((exercise) => ({ exercise, sessions: progressForExercise(exercise.id), sets: setsForExercise(exercise.id) }))
     .filter((item) => item.sets.length > 0)
     .sort((a, b) => (b.sessions.at(-1)?.date || 0) - (a.sessions.at(-1)?.date || 0));
+}
+
+function overallProgressSeries() {
+  const byDay = new Map();
+  trackedExercises().forEach(({ exercise, sessions }) => {
+    const baseline = sessions.find((session) => session.score > 0)?.score || 0;
+    if (!baseline) return;
+    sessions.forEach((session) => {
+      const key = dayKey(session.date);
+      if (!byDay.has(key)) byDay.set(key, { date: session.date, normalized: [], volume: 0, exercises: new Set() });
+      const day = byDay.get(key);
+      day.normalized.push((session.score / baseline) * 100);
+      day.volume += session.tonnage;
+      day.exercises.add(exercise.id);
+    });
+  });
+  return [...byDay.values()]
+    .map((item) => ({
+      date: item.date,
+      score: item.normalized.reduce((sum, value) => sum + value, 0) / Math.max(1, item.normalized.length),
+      volume: item.volume,
+      exerciseCount: item.exercises.size
+    }))
+    .sort((a, b) => a.date - b.date);
 }
 
 function setsByDay() {
@@ -610,7 +635,14 @@ function renderMiniProgress(exerciseId) {
   const sessions = progressForExercise(exerciseId);
   if (sessions.length < 1) return `<p class="muted">Запишите хотя бы один подход.</p>`;
   const id = `chart-${chartRefs.length}`;
-  chartRefs.push({ id, values: sessions.map((s) => s.score), labels: sessions.map((s) => formatDate(s.date)), type: "line", pointValues: sessions.map((s) => s.avgReserve) });
+  chartRefs.push({
+    id,
+    values: sessions.map((s) => s.score),
+    labels: sessions.map((s) => formatDate(s.date)),
+    type: "line",
+    pointValues: sessions.map((s) => s.avgReserve),
+    details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.avgReserve)} запас`)
+  });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
 }
 
@@ -629,17 +661,53 @@ function renderProgress(selectedId) {
     `;
   }
   const sessions = progressForExercise(selected.id);
+  const overall = overallProgressSeries();
   const last = sessions.at(-1);
   const previous = sessions.at(-2);
   const scoreChart = `chart-${chartRefs.length}`;
-  chartRefs.push({ id: scoreChart, values: sessions.map((s) => s.score), labels: sessions.map((s) => formatDate(s.date)), type: "line", pointValues: sessions.map((s) => s.avgReserve) });
+  chartRefs.push({
+    id: scoreChart,
+    values: sessions.map((s) => s.score),
+    labels: sessions.map((s) => formatDate(s.date)),
+    type: "line",
+    pointValues: sessions.map((s) => s.avgReserve),
+    details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.top.weight)}×${s.top.reps}`)
+  });
   const volumeChart = `chart-${chartRefs.length}`;
-  chartRefs.push({ id: volumeChart, values: sessions.map((s) => s.tonnage), labels: sessions.map((s) => formatDate(s.date)), type: "bar" });
+  chartRefs.push({
+    id: volumeChart,
+    values: sessions.map((s) => s.tonnage),
+    labels: sessions.map((s) => formatDate(s.date)),
+    type: "bar",
+    details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.tonnage)} кг×повт · ${s.workCount} рабочих`)
+  });
   const reserveChart = `chart-${chartRefs.length}`;
-  chartRefs.push({ id: reserveChart, values: sessions.map((s) => s.avgReserve), labels: sessions.map((s) => formatDate(s.date)), type: "line" });
+  chartRefs.push({
+    id: reserveChart,
+    values: sessions.map((s) => s.avgReserve),
+    labels: sessions.map((s) => formatDate(s.date)),
+    type: "line",
+    details: sessions.map((s) => `${formatDate(s.date)} · запас ${formatWeight(s.avgReserve)} · ${s.workCount} рабочих`)
+  });
   const fatigueValues = sessions.map((s) => s.fatigue).filter((v) => v != null);
   const fatigueChart = `chart-${chartRefs.length}`;
-  chartRefs.push({ id: fatigueChart, values: fatigueValues, labels: sessions.filter((s) => s.fatigue != null).map((s) => formatDate(s.date)), type: "line", invert: true });
+  const fatigueSessions = sessions.filter((s) => s.fatigue != null);
+  chartRefs.push({
+    id: fatigueChart,
+    values: fatigueValues,
+    labels: fatigueSessions.map((s) => formatDate(s.date)),
+    type: "line",
+    invert: true,
+    details: fatigueSessions.map((s) => `${formatDate(s.date)} · падение ${formatWeight(s.fatigue)} · меньше лучше`)
+  });
+  const overallChart = `chart-${chartRefs.length}`;
+  chartRefs.push({
+    id: overallChart,
+    values: overall.map((item) => item.score),
+    labels: overall.map((item) => formatDate(item.date)),
+    type: "line",
+    details: overall.map((item) => `${formatDate(item.date)} · ${formatWeight(item.score)} общий индекс · ${item.exerciseCount} упр.`)
+  });
   return `
     <section class="progress-hero">
       <div>
@@ -687,6 +755,10 @@ function renderProgress(selectedId) {
     <section class="panel">
       <h2>Последние тренировки</h2>
       ${sessions.length ? `<div class="session-list">${sessions.slice(-6).reverse().map(renderSessionSummary).join("")}</div>` : `<p class="muted">Нет данных.</p>`}
+    </section>
+    <section class="chart-panel overall-panel">
+      <div class="section-head"><h2>Общий тренд</h2><span class="legend-dot">100 = первая тренировка каждого упражнения</span></div>
+      ${overall.length ? `<canvas class="chart" id="${overallChart}" height="230"></canvas><p class="muted">Упражнения нормализуются отдельно, поэтому жим, тяги и ноги можно свести в один общий индекс без смешивания килограммов.</p>` : `<p class="muted">Появится после первых тренировок.</p>`}
     </section>
   `;
 }
@@ -793,7 +865,7 @@ function renderHistoryDay(key, items) {
         <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт</small></span>
         <span>${expanded ? "Свернуть" : "Открыть"}</span>
       </button>
-      ${expanded ? exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
+      ${expanded ? `<div class="history-exercise-strip">${exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
         const exerciseKey = `${key}:${exerciseId}`;
         const exerciseExpanded = expandedHistoryExercises.has(exerciseKey);
         return `
@@ -805,7 +877,7 @@ function renderHistoryDay(key, items) {
             ${exerciseExpanded ? `<div class="sets-list">${sets.map(renderSetRow).join("")}</div>` : ""}
           </article>
         `;
-      }).join("") : ""}
+      }).join("")}</div>` : ""}
     </section>
   `;
 }
@@ -1138,7 +1210,8 @@ async function checkForUpdates() {
 }
 
 function drawCharts() {
-  chartRefs.forEach(({ id, values, labels, type, invert, pointValues }) => {
+  chartRefs.forEach((chart) => {
+    const { id, values, labels, type, invert, pointValues } = chart;
     const canvas = document.getElementById(id);
     if (!canvas || !values.length) return;
     const rect = canvas.getBoundingClientRect();
@@ -1148,19 +1221,25 @@ function drawCharts() {
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
     drawChart(ctx, rect.width, Number(canvas.getAttribute("height")), values, labels, type, invert, pointValues);
+    bindChartTooltip(canvas, chart);
   });
 }
 
-function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null) {
+function chartGeometry(width, height, values, type) {
   const pad = { l: 48, r: 18, t: 18, b: 30 };
   const chartW = width - pad.l - pad.r;
   const chartH = height - pad.t - pad.b;
   const max = Math.max(...values, 1);
   const min = type === "bar" ? 0 : Math.min(...values);
   const range = max - min || 1;
+  return { pad, chartW, chartH, max, min, range };
+}
+
+function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null) {
+  const { pad, chartW, chartH, max, min, range } = chartGeometry(width, height, values, type);
   ctx.clearRect(0, 0, width, height);
   ctx.font = "12px system-ui";
-  ctx.strokeStyle = "#d6ddd6";
+  ctx.strokeStyle = "rgba(105, 115, 108, 0.18)";
   ctx.fillStyle = "#69736c";
   for (let i = 0; i < 5; i += 1) {
     const y = pad.t + (chartH * i) / 4;
@@ -1178,12 +1257,29 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
       const barH = ((value - min) / range) * chartH;
       const x = pad.l + slot * index + slot * 0.18;
       const y = pad.t + chartH - barH;
+      const radius = 7;
       ctx.fillStyle = index === values.length - 1 ? "#d99a32" : "#315d4f";
-      ctx.fillRect(x, y, slot * 0.64, barH);
+      roundRect(ctx, x, y, slot * 0.64, barH, radius);
+      ctx.fill();
     });
   } else {
+    const gradient = ctx.createLinearGradient(0, pad.t, 0, pad.t + chartH);
+    gradient.addColorStop(0, `${color}2b`);
+    gradient.addColorStop(1, `${color}00`);
+    const area = new Path2D();
+    values.forEach((value, index) => {
+      const x = pad.l + (chartW * index) / Math.max(1, values.length - 1);
+      const y = pad.t + chartH - ((value - min) / range) * chartH;
+      if (index === 0) area.moveTo(x, pad.t + chartH);
+      area.lineTo(x, y);
+      if (index === values.length - 1) area.lineTo(x, pad.t + chartH);
+    });
+    area.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill(area);
+
     ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -1198,10 +1294,10 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
       const x = pad.l + (chartW * index) / Math.max(1, values.length - 1);
       const y = pad.t + chartH - ((value - min) / range) * chartH;
       ctx.fillStyle = pointValues ? reserveColor(pointValues[index]) : index === values.length - 1 ? "#f4f7f2" : color;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.arc(x, y, index === values.length - 1 ? 6.5 : 5.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     });
@@ -1212,6 +1308,50 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     const x = pad.l + (chartW * index) / Math.max(1, labels.length - 1);
     ctx.fillText(label, x - 14, height - 8);
   });
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, Math.abs(height) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
+function bindChartTooltip(canvas, chart) {
+  canvas.onclick = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const index = nearestChartIndex(x, rect.width, chart.values, chart.type);
+    if (index == null) return;
+    showChartTooltip(canvas, chart.details?.[index] || `${chart.labels[index]} · ${formatWeight(chart.values[index])}`);
+  };
+}
+
+function nearestChartIndex(x, width, values, type) {
+  if (!values.length) return null;
+  const { pad, chartW } = chartGeometry(width, 220, values, type);
+  if (type === "bar") {
+    const slot = chartW / values.length;
+    return Math.max(0, Math.min(values.length - 1, Math.floor((x - pad.l) / slot)));
+  }
+  const ratio = (x - pad.l) / Math.max(1, chartW);
+  return Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+}
+
+function showChartTooltip(canvas, text) {
+  chartTooltip?.remove();
+  const rect = canvas.getBoundingClientRect();
+  chartTooltip = document.createElement("div");
+  chartTooltip.className = "chart-tooltip";
+  chartTooltip.textContent = text;
+  chartTooltip.style.left = `${Math.min(window.innerWidth - 18, Math.max(8, rect.left + 12))}px`;
+  chartTooltip.style.top = `${Math.max(8, rect.top + window.scrollY + 12)}px`;
+  document.body.append(chartTooltip);
+  window.setTimeout(() => chartTooltip?.remove(), 3200);
 }
 
 let deferredInstallPrompt = null;

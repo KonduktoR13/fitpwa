@@ -232,8 +232,7 @@ h3 {
 .exercise-list,
 .sets-list,
 .session-list,
-.history-day,
-.history-exercise {
+.history-day {
   display: grid;
   gap: 12px;
 }
@@ -716,7 +715,9 @@ h3 {
   border: 1px solid rgb(216 223 216 / 0.9);
   border-radius: 8px;
   padding: 14px;
-  background: rgb(255 255 255 / 0.86);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.94), rgb(255 255 255 / 0.82)),
+    #fff;
   box-shadow: var(--shadow);
 }
 
@@ -799,8 +800,26 @@ h3 {
 }
 
 .history-exercise {
+  display: grid;
+  gap: 12px;
+  min-width: min(320px, 82vw);
   border-left: 3px solid color-mix(in srgb, var(--primary) 38%, var(--line));
   padding-left: 10px;
+}
+
+.history-exercise-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 340px);
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+
+.history-exercise-strip .history-exercise {
+  scroll-snap-align: start;
 }
 
 .modal-backdrop {
@@ -891,6 +910,21 @@ h3 {
   display: block;
   width: 100%;
   margin-top: 10px;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 60;
+  max-width: min(320px, calc(100vw - 24px));
+  border: 1px solid color-mix(in srgb, var(--text) 18%, var(--line));
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #fff;
+  background: rgb(24 33 29 / 0.92);
+  box-shadow: var(--shadow);
+  font-size: 0.9rem;
+  font-weight: 750;
+  pointer-events: none;
 }
 
 .bottom-nav {
@@ -1009,6 +1043,10 @@ h3 {
   .session-summary div:last-child {
     justify-items: start;
     text-align: left;
+  }
+
+  .history-exercise-strip {
+    grid-auto-columns: minmax(248px, 86vw);
   }
 
   .form-grid {
