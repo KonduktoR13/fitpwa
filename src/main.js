@@ -1,6 +1,7 @@
 import "./styles.css";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
+const DATA_VERSION = 2;
 const categories = [
   ["push", "Жим"],
   ["pull", "Тяга"],
@@ -44,8 +45,13 @@ let chartRefs = [];
 let activeSetField = "weight";
 let nativeKeyboard = false;
 let editingSetId = null;
+let editingExerciseId = null;
 let lastTouchedSetId = null;
 let waitingServiceWorker = null;
+let serviceWorkerRegistration = null;
+let historyCursor = new Date();
+let expandedHistoryDays = new Set([dayKey(Date.now())]);
+let expandedHistoryExercises = new Set();
 
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -56,13 +62,14 @@ function loadState() {
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      return { exercises: [], sets: [], ...parsed };
+      return migrateState(parsed);
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
   }
   const now = Date.now();
-  return {
+  return migrateState({
+    schemaVersion: DATA_VERSION,
     exercises: seedExercises.map(([name, category, equipmentType, icon], index) => ({
       id: uid(),
       name,
@@ -74,7 +81,44 @@ function loadState() {
     })),
     sets: [],
     settings: { unit: "кг" }
+  });
+}
+
+function migrateState(input) {
+  const migrated = {
+    schemaVersion: DATA_VERSION,
+    exercises: [],
+    sets: [],
+    settings: { unit: "кг", autoUpdateCheck: true },
+    ...input
   };
+  migrated.settings = { unit: "кг", autoUpdateCheck: true, ...(input.settings || {}) };
+  migrated.exercises = (input.exercises || []).map((exercise) => ({
+    id: exercise.id || uid(),
+    name: exercise.name || "Упражнение",
+    category: exercise.category || "other",
+    equipmentType: exercise.equipmentType || "other",
+    icon: exercise.icon || "🏋️",
+    image: exercise.image || "",
+    createdAt: exercise.createdAt || Date.now()
+  }));
+  migrated.sets = (input.sets || [])
+    .filter((set) => set.exerciseId && Number.isFinite(Number(set.weight)) && Number.isFinite(Number(set.reps)))
+    .map((set) => {
+      const reserve = set.reserve != null ? Number(set.reserve) : reserveValue(set);
+      const next = {
+        id: set.id || uid(),
+        exerciseId: set.exerciseId,
+        weight: Number(set.weight),
+        reps: Number(set.reps),
+        reserve: Math.max(0, Math.min(10, Number.isFinite(reserve) ? reserve : 0)),
+        warmup: Boolean(set.warmup),
+        createdAt: set.createdAt || Date.now()
+      };
+      if (set.updatedAt) next.updatedAt = set.updatedAt;
+      return next;
+    });
+  return migrated;
 }
 
 function saveState() {
@@ -111,6 +155,18 @@ function formatDate(ts) {
 function dayKey(ts) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthTitle(date) {
+  return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(date);
+}
+
+function shiftMonth(date, delta) {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
 }
 
 function e1rm(set) {
@@ -168,7 +224,27 @@ function sessionMetrics(items) {
   const score = top ? adjustedScore(top) : 0;
   const avgReserve = source.reduce((sum, set) => sum + reserveValue(set), 0) / Math.max(1, source.length);
   const fatigue = work.length >= 2 ? Math.max(0, adjustedScore(work[0]) - adjustedScore(work[work.length - 1])) : null;
-  return { date: items[0]?.createdAt || Date.now(), count: items.length, workCount: work.length, top, tonnage, pureE1rm, score, avgReserve, fatigue };
+  const start = items.at(0)?.createdAt || Date.now();
+  const end = items.at(-1)?.createdAt || start;
+  const minutes = Math.max(1, (end - start) / 60000);
+  const density = tonnage / minutes;
+  const firstWork = work.at(0) || null;
+  const lastWork = work.at(-1) || null;
+  return {
+    date: start,
+    count: items.length,
+    workCount: work.length,
+    warmupCount: items.length - work.length,
+    top,
+    tonnage,
+    pureE1rm,
+    score,
+    avgReserve,
+    fatigue,
+    density,
+    firstWork,
+    lastWork
+  };
 }
 
 function progressForExercise(exerciseId) {
@@ -181,6 +257,65 @@ function latestExerciseStats(exerciseId) {
   const prev = sessions.at(-2);
   const best = sessions.reduce((acc, item) => (item.score > (acc?.score || 0) ? item : acc), null);
   return { sessions, last, prev, best };
+}
+
+function setsByDay() {
+  const grouped = new Map();
+  state.sets
+    .slice()
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .forEach((set) => {
+      const key = dayKey(set.createdAt);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(set);
+    });
+  return grouped;
+}
+
+function daySummary(items) {
+  const work = items.filter((set) => !set.warmup);
+  const exerciseIds = new Set(items.map((set) => set.exerciseId));
+  const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
+  const top = work.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), work[0] || null);
+  return {
+    exerciseCount: exerciseIds.size,
+    setCount: items.length,
+    workCount: work.length,
+    tonnage,
+    top
+  };
+}
+
+function exerciseGroupsForDay(items) {
+  const groups = new Map();
+  items.forEach((set) => {
+    if (!groups.has(set.exerciseId)) groups.set(set.exerciseId, []);
+    groups.get(set.exerciseId).push(set);
+  });
+  return [...groups.entries()].map(([exerciseId, sets]) => ({
+    exerciseId,
+    exercise: state.exercises.find((item) => item.id === exerciseId),
+    sets: sets.sort((a, b) => a.createdAt - b.createdAt),
+    metrics: sessionMetrics(sets)
+  }));
+}
+
+function previousWorkoutSets(exerciseId, beforeTs = Date.now()) {
+  return groupSetsByWorkout(setsForExercise(exerciseId).filter((set) => set.createdAt < beforeTs))
+    .filter((items) => dayKey(items[0].createdAt) !== dayKey(Date.now()))
+    .at(-1) || [];
+}
+
+function currentDraftScore() {
+  const weight = Number(String(draftSet.weight || 0).replace(",", "."));
+  const reps = Number(draftSet.reps || 0);
+  if (!Number.isFinite(weight) || weight <= 0 || !Number.isFinite(reps) || reps <= 0) return null;
+  return adjustedScore({
+    weight,
+    reps,
+    reserve: Number(draftSet.reserve || 0),
+    warmup: Boolean(draftSet.warmup)
+  });
 }
 
 function trendText(last, prev, suffix = "") {
@@ -208,10 +343,12 @@ function render() {
         <button class="install-button" data-action="install" hidden>Установить</button>
       </header>
       <main>${renderRoute()}</main>
+      ${editingExerciseId ? renderExerciseEditor() : ""}
       <nav class="bottom-nav">
         <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упражнения</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
         <button class="${route.name === "history" ? "active" : ""}" data-action="history">История</button>
+        <button class="${route.name === "settings" ? "active" : ""}" data-action="settings">Данные</button>
       </nav>
     </div>
   `;
@@ -223,12 +360,15 @@ function renderRoute() {
   if (route.name === "exercise") return renderExercise(route.id);
   if (route.name === "progress") return renderProgress(route.id);
   if (route.name === "history") return renderHistory();
+  if (route.name === "settings") return renderSettings();
   return renderHome();
 }
 
 function renderHome() {
   const totalSets = state.sets.length;
   const trainedToday = state.sets.filter((set) => dayKey(set.createdAt) === dayKey(Date.now())).length;
+  const todayItems = setsByDay().get(dayKey(Date.now())) || [];
+  const todaySummary = daySummary(todayItems);
   const grouped = categories.map(([key, title]) => [key, title, state.exercises.filter((item) => item.category === key)]);
   return `
     <section class="hero">
@@ -242,6 +382,19 @@ function renderHome() {
         <div><strong>${trainedToday}</strong><span>сегодня</span></div>
       </div>
     </section>
+    ${todayItems.length ? `
+      <section class="panel compact-day">
+        <div class="section-head">
+          <h2>Сегодня</h2>
+          <button data-action="history-day" data-day="${dayKey(Date.now())}">Открыть день</button>
+        </div>
+        <div class="mini-metrics">
+          <span>${todaySummary.exerciseCount} упр.</span>
+          <span>${todaySummary.workCount} рабочих</span>
+          <span>${formatWeight(todaySummary.tonnage)} кг×повт</span>
+        </div>
+      </section>
+    ` : ""}
     <section class="toolbar">
       <input type="search" id="search" placeholder="Найти упражнение" autocomplete="off" />
       <button class="primary" data-action="toggle-form">Новое</button>
@@ -285,7 +438,7 @@ function renderExerciseCard(exercise) {
 
 function renderExerciseForm(exercise = null) {
   return `
-    <form class="panel exercise-form" data-form="exercise">
+    <form class="panel exercise-form" data-form="exercise" ${exercise ? `data-id="${exercise.id}"` : ""}>
       <h2>${exercise ? "Редактировать упражнение" : "Новое упражнение"}</h2>
       <div class="form-grid">
         <label>Название<input name="name" required value="${exercise?.name || ""}" /></label>
@@ -299,6 +452,19 @@ function renderExerciseForm(exercise = null) {
         <button type="button" data-action="toggle-form">Закрыть</button>
       </div>
     </form>
+  `;
+}
+
+function renderExerciseEditor() {
+  const exercise = state.exercises.find((item) => item.id === editingExerciseId);
+  if (!exercise) return "";
+  return `
+    <div class="modal-backdrop" data-action="close-exercise-editor">
+      <div class="modal-sheet" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        ${renderExerciseForm(exercise)}
+        <button class="danger-zone" data-action="delete-exercise" data-id="${exercise.id}">Удалить упражнение</button>
+      </div>
+    </div>
   `;
 }
 
@@ -343,6 +509,8 @@ function renderExercise(exerciseId) {
       <div class="quick-row">
         ${allSets.at(-1) ? `<button type="button" data-action="repeat-last" data-weight="${allSets.at(-1).weight}" data-reps="${allSets.at(-1).reps}" data-reserve="${reserveValue(allSets.at(-1))}">Повторить последний: ${formatWeight(allSets.at(-1).weight)} × ${allSets.at(-1).reps}</button>` : ""}
         ${previous ? `<button type="button" data-action="repeat-best" data-weight="${previous.top.weight}" data-reps="${previous.top.reps}" data-reserve="${reserveValue(previous.top)}">Лучший прошлый: ${formatWeight(previous.top.weight)} × ${previous.top.reps}</button>` : ""}
+        <button type="button" data-action="set-reserve" data-reserve="2">Рабочий запас 2</button>
+        <button type="button" data-action="set-reserve" data-reserve="6">Разминка запас 6</button>
       </div>
       <div class="input-pair">
         <label class="number-control">
@@ -368,6 +536,7 @@ function renderExercise(exerciseId) {
         <input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" />
       </label>
       <label class="warmup-toggle"><input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} /> Разминка</label>
+      ${renderSetComparison(exercise.id, formValues)}
       <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
     </form>
     <section class="panel">
@@ -378,6 +547,33 @@ function renderExercise(exerciseId) {
       <div class="section-head"><h2>Прогресс упражнения</h2><button data-action="progress-exercise" data-id="${exercise.id}">Подробнее</button></div>
       ${renderMiniProgress(exercise.id)}
     </section>
+  `;
+}
+
+function renderSetComparison(exerciseId, formValues) {
+  if (formValues.warmup) {
+    return `<div class="comparison muted">Разминка не сравнивается с рабочими подходами.</div>`;
+  }
+  const previousWork = previousWorkoutSets(exerciseId)
+    .filter((set) => !set.warmup)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  if (!previousWork.length) {
+    return `<div class="comparison muted">Прошлых рабочих подходов пока нет.</div>`;
+  }
+  const todayWorkIndex = state.sets.filter((set) => set.exerciseId === exerciseId && !set.warmup && dayKey(set.createdAt) === dayKey(Date.now())).length;
+  const target = previousWork[todayWorkIndex] || previousWork.at(-1);
+  const weight = Number(String(formValues.weight || 0).replace(",", "."));
+  const reps = Number(formValues.reps || 0);
+  const canCompare = Number.isFinite(weight) && weight > 0 && Number.isFinite(reps) && reps > 0;
+  const current = canCompare ? adjustedScore({ weight, reps, reserve: Number(formValues.reserve || 0), warmup: false }) : null;
+  const previousScore = adjustedScore(target);
+  const delta = current == null ? null : current - previousScore;
+  const direction = delta == null ? "" : delta >= 0 ? "good" : "bad";
+  return `
+    <div class="comparison ${direction}">
+      <span>Прошлый рабочий №${Math.min(todayWorkIndex + 1, previousWork.length)}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
+      <strong>${delta == null ? "Введите вес и повторы" : trendText(current, previousScore)}</strong>
+    </div>
   `;
 }
 
@@ -412,7 +608,7 @@ function renderMiniProgress(exerciseId) {
   const sessions = progressForExercise(exerciseId);
   if (sessions.length < 1) return `<p class="muted">Запишите хотя бы один подход.</p>`;
   const id = `chart-${chartRefs.length}`;
-  chartRefs.push({ id, values: sessions.map((s) => s.score), labels: sessions.map((s) => formatDate(s.date)), type: "line" });
+  chartRefs.push({ id, values: sessions.map((s) => s.score), labels: sessions.map((s) => formatDate(s.date)), type: "line", pointValues: sessions.map((s) => s.avgReserve) });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
 }
 
@@ -423,9 +619,11 @@ function renderProgress(selectedId = state.exercises[0]?.id) {
   const last = sessions.at(-1);
   const previous = sessions.at(-2);
   const scoreChart = `chart-${chartRefs.length}`;
-  chartRefs.push({ id: scoreChart, values: sessions.map((s) => s.score), labels: sessions.map((s) => formatDate(s.date)), type: "line" });
+  chartRefs.push({ id: scoreChart, values: sessions.map((s) => s.score), labels: sessions.map((s) => formatDate(s.date)), type: "line", pointValues: sessions.map((s) => s.avgReserve) });
   const volumeChart = `chart-${chartRefs.length}`;
   chartRefs.push({ id: volumeChart, values: sessions.map((s) => s.tonnage), labels: sessions.map((s) => formatDate(s.date)), type: "bar" });
+  const reserveChart = `chart-${chartRefs.length}`;
+  chartRefs.push({ id: reserveChart, values: sessions.map((s) => s.avgReserve), labels: sessions.map((s) => formatDate(s.date)), type: "line" });
   const fatigueValues = sessions.map((s) => s.fatigue).filter((v) => v != null);
   const fatigueChart = `chart-${chartRefs.length}`;
   chartRefs.push({ id: fatigueChart, values: fatigueValues, labels: sessions.filter((s) => s.fatigue != null).map((s) => formatDate(s.date)), type: "line", invert: true });
@@ -442,13 +640,38 @@ function renderProgress(selectedId = state.exercises[0]?.id) {
       <div class="insight"><span>Рабочий объём</span><strong>${last ? formatWeight(last.tonnage) : "—"}</strong><p>Килограммы × повторы за тренировку</p></div>
       <div class="insight"><span>Средний запас</span><strong>${last ? formatWeight(last.avgReserve) : "—"}</strong><p>Больше при той же работе = лучше</p></div>
     </section>
-    <section class="panel"><h2>Индекс формы</h2>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="220"></canvas>` : `<p class="muted">Нет данных.</p>`}</section>
-    <section class="panel"><h2>Рабочий объём</h2>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="220"></canvas>` : `<p class="muted">Нет данных.</p>`}</section>
-    <section class="panel"><h2>Падение по подходам</h2>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="220"></canvas>` : `<p class="muted">Появится, когда в тренировке будет два рабочих подхода.</p>`}</section>
+    ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous)}</section>` : ""}
+    <section class="panel"><div class="section-head"><h2>Индекс формы</h2><span class="legend-dot">цвет точки = запас</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="220"></canvas><p class="muted">Индекс соединяет лучший рабочий e1RM и запас повторов. Разминка не раздувает показатель.</p>` : `<p class="muted">Нет данных.</p>`}</section>
+    <section class="panel"><div class="section-head"><h2>Рабочий объём</h2><span class="legend-dot">кг × повторы</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="220"></canvas><p class="muted">Показывает общий объём рабочих подходов за день.</p>` : `<p class="muted">Нет данных.</p>`}</section>
+    <section class="panel"><div class="section-head"><h2>Запас повторов</h2><span class="legend-dot">0 = отказ, 10 = легко</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="220"></canvas><p class="muted">Если вес и повторы прежние, но запас выше, форма стала лучше.</p>` : `<p class="muted">Нет данных.</p>`}</section>
+    <section class="panel"><div class="section-head"><h2>Падение по серии</h2><span class="legend-dot">меньше = устойчивее</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="220"></canvas><p class="muted">Сравнивает первый и последний рабочий подход внутри серии.</p>` : `<p class="muted">Появится, когда в тренировке будет два рабочих подхода.</p>`}</section>
     <section class="panel">
       <h2>Последние тренировки</h2>
       ${sessions.length ? `<div class="session-list">${sessions.slice(-6).reverse().map(renderSessionSummary).join("")}</div>` : `<p class="muted">Нет данных.</p>`}
     </section>
+  `;
+}
+
+function renderProgressNote(last, previous) {
+  if (!previous) {
+    return `<h2>Вывод</h2><p class="muted">Есть первая точка. Следующая тренировка даст сравнение.</p>`;
+  }
+  const scoreDelta = last.score - previous.score;
+  const volumeDelta = last.tonnage - previous.tonnage;
+  const reserveDelta = last.avgReserve - previous.avgReserve;
+  const parts = [
+    scoreDelta >= 0 ? "индекс формы вырос" : "индекс формы снизился",
+    volumeDelta >= 0 ? "объём выше" : "объём ниже",
+    reserveDelta >= 0 ? "запаса больше" : "запаса меньше"
+  ];
+  return `
+    <h2>Вывод</h2>
+    <p>${parts.join(", ")}.</p>
+    <div class="mini-metrics">
+      <span>${trendText(last.score, previous.score)}</span>
+      <span>${trendText(last.tonnage, previous.tonnage, " объём")}</span>
+      <span>${trendText(last.avgReserve, previous.avgReserve, " запас")}</span>
+    </div>
   `;
 }
 
@@ -469,36 +692,117 @@ function renderSessionSummary(session) {
 }
 
 function renderHistory() {
-  const byDate = new Map();
-  state.sets
-    .slice()
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .forEach((set) => {
-      const key = dayKey(set.createdAt);
-      if (!byDate.has(key)) byDate.set(key, []);
-      byDate.get(key).push(set);
-    });
+  const byDate = setsByDay();
+  const visibleDays = [...byDate.entries()]
+    .filter(([key]) => key.startsWith(monthKey(historyCursor)))
+    .sort((a, b) => b[0].localeCompare(a[0]));
   return `
-    <section class="progress-top"><h1>История</h1><button data-action="export">Экспорт JSON</button></section>
-    ${state.sets.length ? [...byDate.entries()].map(([, items]) => renderHistoryDay(items)).join("") : `<section class="panel"><p class="muted">История пока пустая.</p></section>`}
+    <section class="progress-top history-top">
+      <h1>История</h1>
+      <div class="month-controls">
+        <button data-action="history-month" data-delta="-1">←</button>
+        <strong>${monthTitle(historyCursor)}</strong>
+        <button data-action="history-month" data-delta="1">→</button>
+      </div>
+    </section>
+    <section class="panel">
+      ${renderCalendar(byDate)}
+    </section>
+    ${state.sets.length
+      ? (visibleDays.length ? visibleDays.map(([key, items]) => renderHistoryDay(key, items)).join("") : `<section class="panel"><p class="muted">В этом месяце тренировок нет.</p></section>`)
+      : `<section class="panel"><p class="muted">История пока пустая.</p></section>`}
   `;
 }
 
-function renderHistoryDay(items) {
+function renderCalendar(byDate) {
+  const first = new Date(historyCursor.getFullYear(), historyCursor.getMonth(), 1);
+  const last = new Date(historyCursor.getFullYear(), historyCursor.getMonth() + 1, 0);
+  const startOffset = (first.getDay() + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < startOffset; i += 1) cells.push(null);
+  for (let day = 1; day <= last.getDate(); day += 1) {
+    cells.push(new Date(historyCursor.getFullYear(), historyCursor.getMonth(), day));
+  }
+  const week = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  return `
+    <div class="calendar">
+      ${week.map((item) => `<span class="weekday">${item}</span>`).join("")}
+      ${cells.map((date) => {
+        if (!date) return `<span></span>`;
+        const key = dayKey(date.getTime());
+        const items = byDate.get(key) || [];
+        const summary = daySummary(items);
+        return `
+          <button class="calendar-day ${items.length ? "has-training" : ""} ${expandedHistoryDays.has(key) ? "selected" : ""}" data-action="history-day" data-day="${key}">
+            <strong>${date.getDate()}</strong>
+            ${items.length ? `<small>${summary.exerciseCount} упр.</small>` : ""}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderHistoryDay(key, items) {
+  const expanded = expandedHistoryDays.has(key);
   const title = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", weekday: "long" }).format(new Date(items[0].createdAt));
+  const summary = daySummary(items);
   const groups = groupSetsByWorkout(items);
   return `
     <section class="panel history-day">
-      <h2>${title}</h2>
-      ${groups.map((sets) => {
-        const exercise = state.exercises.find((item) => item.id === sets[0].exerciseId);
+      <button class="day-toggle" data-action="history-day" data-day="${key}">
+        <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт</small></span>
+        <span>${expanded ? "Свернуть" : "Открыть"}</span>
+      </button>
+      ${expanded ? exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
+        const exerciseKey = `${key}:${exerciseId}`;
+        const exerciseExpanded = expandedHistoryExercises.has(exerciseKey);
         return `
           <article class="history-exercise">
-            <div class="section-head"><h3>${exercise?.name || "Удалённое упражнение"}</h3><span>${sets.length} подх.</span></div>
-            <div class="sets-list">${sets.map(renderSetRow).join("")}</div>
+            <button class="exercise-toggle" data-action="history-exercise" data-key="${exerciseKey}">
+              <span>${exercise?.name || "Удалённое упражнение"}</span>
+              <small>${metrics.workCount} раб. · ${formatWeight(metrics.tonnage)} объём · ${metrics.top ? `${formatWeight(metrics.top.weight)} × ${metrics.top.reps}` : "нет рабочих"}</small>
+            </button>
+            ${exerciseExpanded ? `<div class="sets-list">${sets.map(renderSetRow).join("")}</div>` : ""}
           </article>
         `;
-      }).join("")}
+      }).join("") : ""}
+    </section>
+  `;
+}
+
+function renderSettings() {
+  const days = setsByDay().size;
+  const storageKb = Math.round(new Blob([JSON.stringify(state)]).size / 1024);
+  return `
+    <section class="progress-top">
+      <h1>Данные</h1>
+      <button data-action="check-update">Проверить обновления</button>
+    </section>
+    <section class="insight-grid">
+      <div class="insight"><span>Версия данных</span><strong>${state.schemaVersion || DATA_VERSION}</strong><p>Миграции применяются автоматически</p></div>
+      <div class="insight"><span>Дней</span><strong>${days}</strong><p>Дни с записанными подходами</p></div>
+      <div class="insight"><span>Подходов</span><strong>${state.sets.length}</strong><p>Все записи хранятся локально</p></div>
+      <div class="insight"><span>Размер</span><strong>${storageKb} КБ</strong><p>Примерно в памяти браузера</p></div>
+    </section>
+    <section class="panel">
+      <h2>Резервная копия</h2>
+      <p class="muted">Экспорт сохраняет упражнения, подходы, картинки и настройки в один JSON-файл.</p>
+      <div class="actions settings-actions">
+        <button class="primary" data-action="export">Скачать JSON</button>
+        <label class="file-action">
+          <span>Импорт JSON</span>
+          <input type="file" accept="application/json,.json" data-action="import-file" />
+        </label>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>PWA</h2>
+      <div class="settings-list">
+        <div><strong>Установка</strong><span>Кнопка установки появляется, когда браузер разрешает установку.</span></div>
+        <div><strong>Обновления</strong><span>Приложение проверяет новый service worker при запуске и раз в минуту.</span></div>
+        <div><strong>Оффлайн</strong><span>Последняя загруженная версия открывается без сети, данные остаются на устройстве.</span></div>
+      </div>
     </section>
   `;
 }
@@ -507,10 +811,28 @@ function bindEvents(root) {
   root.querySelectorAll("[data-action='home']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "home" })));
   root.querySelectorAll("[data-action='progress']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress" })));
   root.querySelectorAll("[data-action='history']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "history" })));
+  root.querySelectorAll("[data-action='settings']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "settings" })));
   root.querySelector("[data-action='toggle-form']")?.addEventListener("click", () => {
     exerciseFormOpen = !exerciseFormOpen;
     render();
   });
+  root.querySelectorAll("[data-action='history-day']").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.day;
+    expandedHistoryDays.has(key) ? expandedHistoryDays.delete(key) : expandedHistoryDays.add(key);
+    if (route.name !== "history") route = { name: "history" };
+    const [year, month] = key.split("-").map(Number);
+    historyCursor = new Date(year, month - 1, 1);
+    render();
+  }));
+  root.querySelectorAll("[data-action='history-exercise']").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.key;
+    expandedHistoryExercises.has(key) ? expandedHistoryExercises.delete(key) : expandedHistoryExercises.add(key);
+    render();
+  }));
+  root.querySelectorAll("[data-action='history-month']").forEach((button) => button.addEventListener("click", () => {
+    historyCursor = shiftMonth(historyCursor, Number(button.dataset.delta));
+    render();
+  }));
   root.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
     draftSet = { weight: "", reps: "8", reserve: 2, warmup: false };
     setRoute({ name: "exercise", id: card.dataset.openExercise });
@@ -527,6 +849,9 @@ function bindEvents(root) {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
     root.querySelector("#reserveText").textContent = reserveName(Number(event.target.value));
     event.target.style.setProperty("--thumb-color", reserveColor(Number(event.target.value)));
+  });
+  root.querySelector("[name='warmup']")?.addEventListener("change", (event) => {
+    if (!editingSetId) draftSet.warmup = event.target.checked;
   });
   root.querySelectorAll("[data-set-field]").forEach((input) => {
     input.addEventListener("focus", () => {
@@ -553,6 +878,18 @@ function bindEvents(root) {
     nativeKeyboard = !nativeKeyboard;
     render();
   });
+  root.querySelectorAll("[data-action='set-reserve']").forEach((button) => button.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set']");
+    const reserve = Number(button.dataset.reserve);
+    if (!form) return;
+    form.elements.reserve.value = reserve;
+    form.elements.warmup.checked = reserve >= 6;
+    if (!editingSetId) {
+      draftSet.reserve = reserve;
+      draftSet.warmup = reserve >= 6;
+    }
+    root.querySelector("#reserveText").textContent = reserveName(reserve);
+  }));
   root.querySelectorAll("[data-action='repeat-last'], [data-action='repeat-best']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set']");
     form.elements.weight.value = button.dataset.weight;
@@ -576,7 +913,14 @@ function bindEvents(root) {
   root.querySelectorAll("[data-action='progress-exercise']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress", id: button.dataset.id })));
   root.querySelector("[data-action='select-progress']")?.addEventListener("change", (event) => setRoute({ name: "progress", id: event.target.value }));
   root.querySelector("[data-action='edit-exercise']")?.addEventListener("click", (event) => openEditDialog(event.currentTarget.dataset.id));
+  root.querySelector("[data-action='close-exercise-editor']")?.addEventListener("click", () => {
+    editingExerciseId = null;
+    render();
+  });
+  root.querySelector("[data-action='delete-exercise']")?.addEventListener("click", (event) => deleteExercise(event.currentTarget.dataset.id));
   root.querySelector("[data-action='export']")?.addEventListener("click", exportJson);
+  root.querySelector("[data-action='import-file']")?.addEventListener("change", importJson);
+  root.querySelector("[data-action='check-update']")?.addEventListener("click", checkForUpdates);
 }
 
 function handleKeypad(key) {
@@ -610,15 +954,25 @@ async function saveExercise(event) {
   const data = new FormData(form);
   const file = data.get("image");
   const image = file && file.size ? await fileToDataUrl(file) : "";
-  state.exercises.push({
-    id: uid(),
-    name: String(data.get("name")).trim(),
-    icon: String(data.get("icon")).trim() || "🏋️",
-    image,
-    category: data.get("category"),
-    equipmentType: data.get("equipmentType"),
-    createdAt: Date.now()
-  });
+  const existing = form.dataset.id ? state.exercises.find((exercise) => exercise.id === form.dataset.id) : null;
+  if (existing) {
+    existing.name = String(data.get("name")).trim() || existing.name;
+    existing.icon = String(data.get("icon")).trim() || existing.icon || "🏋️";
+    existing.category = data.get("category");
+    existing.equipmentType = data.get("equipmentType");
+    if (image) existing.image = image;
+    editingExerciseId = null;
+  } else {
+    state.exercises.push({
+      id: uid(),
+      name: String(data.get("name")).trim(),
+      icon: String(data.get("icon")).trim() || "🏋️",
+      image,
+      category: data.get("category"),
+      equipmentType: data.get("equipmentType"),
+      createdAt: Date.now()
+    });
+  }
   exerciseFormOpen = false;
   saveState();
   render();
@@ -677,13 +1031,17 @@ function startEditSet(id) {
 }
 
 function openEditDialog(id) {
-  const exercise = state.exercises.find((item) => item.id === id);
-  if (!exercise) return;
-  const name = prompt("Название упражнения", exercise.name);
-  if (name == null) return;
-  const icon = prompt("Иконка или символ", exercise.icon || "🏋️");
-  exercise.name = name.trim() || exercise.name;
-  exercise.icon = icon?.trim() || exercise.icon;
+  editingExerciseId = id;
+  render();
+}
+
+function deleteExercise(id) {
+  const hasSets = state.sets.some((set) => set.exerciseId === id);
+  if (hasSets && !confirm("У упражнения есть история. Удалить упражнение и все его подходы?")) return;
+  state.exercises = state.exercises.filter((exercise) => exercise.id !== id);
+  state.sets = state.sets.filter((set) => set.exerciseId !== id);
+  editingExerciseId = null;
+  if (route.name === "exercise" && route.id === id) route = { name: "home" };
   saveState();
   render();
 }
@@ -698,7 +1056,8 @@ function fileToDataUrl(file) {
 }
 
 function exportJson() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const payload = { ...state, schemaVersion: DATA_VERSION, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -707,8 +1066,40 @@ function exportJson() {
   URL.revokeObjectURL(url);
 }
 
+async function importJson(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const imported = migrateState(parsed);
+    const replace = confirm("Заменить текущие локальные данные импортированным файлом?");
+    if (!replace) return;
+    state = imported;
+    saveState();
+    route = { name: "settings" };
+    render();
+  } catch {
+    alert("Не удалось прочитать JSON-файл.");
+  } finally {
+    event.target.value = "";
+  }
+}
+
+async function checkForUpdates() {
+  if (!serviceWorkerRegistration) {
+    alert("Service worker ещё не зарегистрирован.");
+    return;
+  }
+  await serviceWorkerRegistration.update();
+  if (serviceWorkerRegistration.waiting) {
+    showUpdatePrompt(serviceWorkerRegistration.waiting);
+  } else {
+    alert("Новая версия пока не найдена.");
+  }
+}
+
 function drawCharts() {
-  chartRefs.forEach(({ id, values, labels, type, invert }) => {
+  chartRefs.forEach(({ id, values, labels, type, invert, pointValues }) => {
     const canvas = document.getElementById(id);
     if (!canvas || !values.length) return;
     const rect = canvas.getBoundingClientRect();
@@ -717,11 +1108,11 @@ function drawCharts() {
     canvas.height = Number(canvas.getAttribute("height")) * dpr;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
-    drawChart(ctx, rect.width, Number(canvas.getAttribute("height")), values, labels, type, invert);
+    drawChart(ctx, rect.width, Number(canvas.getAttribute("height")), values, labels, type, invert, pointValues);
   });
 }
 
-function drawChart(ctx, width, height, values, labels, type, invert = false) {
+function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null) {
   const pad = { l: 48, r: 18, t: 18, b: 30 };
   const chartW = width - pad.l - pad.r;
   const chartH = height - pad.t - pad.b;
@@ -767,7 +1158,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false) {
     values.forEach((value, index) => {
       const x = pad.l + (chartW * index) / Math.max(1, values.length - 1);
       const y = pad.t + chartH - ((value - min) / range) * chartH;
-      ctx.fillStyle = index === values.length - 1 ? "#f4f7f2" : color;
+      ctx.fillStyle = pointValues ? reserveColor(pointValues[index]) : index === values.length - 1 ? "#f4f7f2" : color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -805,6 +1196,7 @@ render();
 
 async function registerServiceWorker() {
   const registration = await navigator.serviceWorker.register("./sw.js");
+  serviceWorkerRegistration = registration;
 
   if (registration.waiting) {
     showUpdatePrompt(registration.waiting);

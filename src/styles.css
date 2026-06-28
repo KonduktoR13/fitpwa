@@ -174,7 +174,8 @@ h3 {
 
 .hero-stats,
 .metrics-row,
-.insight-grid {
+.insight-grid,
+.mini-metrics {
   display: grid;
   gap: 10px;
 }
@@ -214,7 +215,8 @@ h3 {
 .section-head,
 .exercise-header,
 .quick-row,
-.actions {
+.actions,
+.month-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -238,6 +240,24 @@ h3 {
 
 .group {
   margin-top: 24px;
+}
+
+.compact-day {
+  margin-bottom: 18px;
+}
+
+.mini-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.mini-metrics span {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--muted);
+  background: #fff;
+  font-weight: 750;
 }
 
 .exercise-card {
@@ -456,6 +476,24 @@ h3 {
   padding: 0;
 }
 
+.comparison {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.comparison.good strong {
+  color: var(--primary);
+}
+
+.comparison.bad strong {
+  color: var(--danger);
+}
+
 .warmup-toggle {
   display: flex;
   align-items: center;
@@ -540,6 +578,148 @@ h3 {
   margin-top: 16px;
 }
 
+.progress-note p {
+  margin-top: 8px;
+}
+
+.legend-dot {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.weekday {
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.calendar-day {
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  padding: 7px;
+  text-align: left;
+}
+
+.calendar-day.has-training {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+  background: color-mix(in srgb, var(--primary) 8%, #fff);
+}
+
+.calendar-day.selected {
+  color: #fff;
+  background: var(--text);
+}
+
+.calendar-day small {
+  color: inherit;
+  opacity: 0.78;
+}
+
+.day-toggle,
+.exercise-toggle {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 50px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.day-toggle span,
+.exercise-toggle span {
+  display: grid;
+  gap: 3px;
+}
+
+.day-toggle small,
+.exercise-toggle small {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.history-exercise {
+  border-left: 3px solid color-mix(in srgb, var(--primary) 38%, var(--line));
+  padding-left: 10px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  align-items: end;
+  background: rgb(24 33 29 / 0.38);
+}
+
+.modal-sheet {
+  width: min(720px, calc(100% - 24px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  margin: 0 auto 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.danger-zone {
+  width: calc(100% - 32px);
+  margin: 0 16px 16px;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.settings-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.file-action {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  color: var(--text);
+  background: #fff;
+  cursor: pointer;
+}
+
+.file-action input {
+  display: none;
+}
+
+.settings-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.settings-list div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.settings-list span {
+  color: var(--muted);
+}
+
 @keyframes saved-settle {
   0% {
     opacity: 0;
@@ -570,7 +750,7 @@ h3 {
   left: max(12px, calc((100vw - 1120px) / 2 + 16px));
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -628,7 +808,8 @@ h3 {
   .exercise-header,
   .input-pair,
   .insight-grid,
-  .session-summary {
+  .session-summary,
+  .mini-metrics {
     grid-template-columns: 1fr;
   }
 
@@ -671,6 +852,7 @@ h3 {
   }
 
   .bottom-nav {
+    grid-template-columns: repeat(4, 1fr);
     right: 12px;
     left: 12px;
   }
