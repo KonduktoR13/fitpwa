@@ -50,7 +50,7 @@ let lastTouchedSetId = null;
 let waitingServiceWorker = null;
 let serviceWorkerRegistration = null;
 let historyCursor = new Date();
-let expandedHistoryDays = new Set([dayKey(Date.now())]);
+let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
 
 function uid() {
@@ -345,10 +345,10 @@ function render() {
       <main>${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
       <nav class="bottom-nav">
-        <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упражнения</button>
+        <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упр.</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
         <button class="${route.name === "history" ? "active" : ""}" data-action="history">История</button>
-        <button class="${route.name === "settings" ? "active" : ""}" data-action="settings">Данные</button>
+        <button class="${route.name === "settings" ? "active" : ""}" data-action="settings">Ещё</button>
       </nav>
     </div>
   `;
@@ -485,11 +485,6 @@ function renderExercise(exerciseId) {
         warmup: editingSet.warmup
       }
     : draftSet;
-  if (!draftSet.weight && allSets.at(-1)) {
-    draftSet.weight = String(allSets.at(-1).weight);
-    draftSet.reps = String(allSets.at(-1).reps);
-    draftSet.reserve = reserveValue(allSets.at(-1));
-  }
   return `
     <section class="exercise-header">
       <button data-action="home" class="ghost">← Назад</button>
@@ -733,7 +728,7 @@ function renderCalendar(byDate) {
         const items = byDate.get(key) || [];
         const summary = daySummary(items);
         return `
-          <button class="calendar-day ${items.length ? "has-training" : ""} ${expandedHistoryDays.has(key) ? "selected" : ""}" data-action="history-day" data-day="${key}">
+          <button class="calendar-day ${items.length ? "has-training" : ""} ${activeHistoryDay === key ? "selected" : ""}" data-action="history-day" data-day="${key}">
             <strong>${date.getDate()}</strong>
             ${items.length ? `<small>${summary.exerciseCount} упр.</small>` : ""}
           </button>
@@ -744,7 +739,7 @@ function renderCalendar(byDate) {
 }
 
 function renderHistoryDay(key, items) {
-  const expanded = expandedHistoryDays.has(key);
+  const expanded = activeHistoryDay === key;
   const title = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", weekday: "long" }).format(new Date(items[0].createdAt));
   const summary = daySummary(items);
   const groups = groupSetsByWorkout(items);
@@ -818,7 +813,7 @@ function bindEvents(root) {
   });
   root.querySelectorAll("[data-action='history-day']").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.day;
-    expandedHistoryDays.has(key) ? expandedHistoryDays.delete(key) : expandedHistoryDays.add(key);
+    activeHistoryDay = key;
     if (route.name !== "history") route = { name: "history" };
     const [year, month] = key.split("-").map(Number);
     historyCursor = new Date(year, month - 1, 1);

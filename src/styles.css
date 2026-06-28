@@ -745,16 +745,16 @@ h3 {
 
 .bottom-nav {
   position: fixed;
-  right: max(12px, calc((100vw - 1120px) / 2 + 16px));
-  bottom: 14px;
-  left: max(12px, calc((100vw - 1120px) / 2 + 16px));
+  right: max(8px, calc((100vw - 1120px) / 2 + 16px));
+  bottom: 10px;
+  left: max(8px, calc((100vw - 1120px) / 2 + 16px));
   z-index: 20;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 5px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 8px;
+  padding: 6px;
   background: rgb(255 255 255 / 0.9);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
@@ -762,8 +762,15 @@ h3 {
 
 .bottom-nav button {
   border: 0;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 4px;
   background: transparent;
+  font-size: 0.82rem;
   font-weight: 750;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bottom-nav button.active {
@@ -853,8 +860,8 @@ h3 {
 
   .bottom-nav {
     grid-template-columns: repeat(4, 1fr);
-    right: 12px;
-    left: 12px;
+    right: 8px;
+    left: 8px;
   }
 
   .update-prompt {
