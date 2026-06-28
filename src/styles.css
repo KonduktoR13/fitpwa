@@ -578,6 +578,156 @@ h3 {
   margin-top: 16px;
 }
 
+.progress-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 300px);
+  gap: 18px;
+  align-items: end;
+  padding: 34px 0 12px;
+}
+
+.progress-hero h1 {
+  font-size: clamp(2.4rem, 8vw, 5.4rem);
+}
+
+.progress-subline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.progress-subline span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--muted);
+  background: rgb(255 255 255 / 0.72);
+  font-weight: 750;
+}
+
+.progress-score {
+  display: grid;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--primary) 36%, var(--line));
+  border-radius: 8px;
+  padding: 16px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--primary) 15%, #fff), #fff 62%),
+    #fff;
+  box-shadow: var(--shadow);
+}
+
+.progress-score span,
+.progress-score small {
+  color: var(--muted);
+}
+
+.progress-score strong {
+  color: var(--primary-dark);
+  font-size: 3rem;
+  line-height: 0.95;
+}
+
+.progress-picker {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(180px, 240px);
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 0 12px;
+  scrollbar-width: thin;
+}
+
+.progress-picker button {
+  display: grid;
+  gap: 4px;
+  height: auto;
+  min-height: 88px;
+  align-content: start;
+  padding: 12px;
+  text-align: left;
+}
+
+.progress-picker button.active {
+  border-color: var(--text);
+  color: #fff;
+  background: var(--text);
+}
+
+.progress-picker button small {
+  color: inherit;
+  opacity: 0.72;
+}
+
+.progress-mosaic {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.metric-tile {
+  display: grid;
+  gap: 5px;
+  min-height: 120px;
+  align-content: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.metric-tile strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.metric-tile span,
+.metric-tile p {
+  color: var(--muted);
+}
+
+.metric-tile.strength {
+  background: linear-gradient(145deg, rgb(29 119 93 / 0.16), #fff 68%);
+}
+
+.metric-tile.volume {
+  background: linear-gradient(145deg, rgb(217 154 50 / 0.18), #fff 68%);
+}
+
+.metric-tile.reserve {
+  background: linear-gradient(145deg, rgb(49 93 79 / 0.12), #fff 68%);
+}
+
+.metric-tile.stability {
+  background: linear-gradient(145deg, rgb(200 84 63 / 0.1), #fff 68%);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.chart-panel {
+  border: 1px solid rgb(216 223 216 / 0.9);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgb(255 255 255 / 0.86);
+  box-shadow: var(--shadow);
+}
+
+.primary-chart {
+  grid-row: span 2;
+}
+
+.empty-progress {
+  min-height: 420px;
+}
+
 .progress-note p {
   margin-top: 8px;
 }
@@ -813,6 +963,9 @@ h3 {
   .hero,
   .exercise-card,
   .exercise-header,
+  .progress-hero,
+  .progress-mosaic,
+  .chart-grid,
   .input-pair,
   .insight-grid,
   .session-summary,
@@ -833,6 +986,14 @@ h3 {
   .progress-top {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .primary-chart {
+    grid-row: auto;
+  }
+
+  .progress-score strong {
+    font-size: 2.4rem;
   }
 
   .exercise-card {

@@ -259,6 +259,13 @@ function latestExerciseStats(exerciseId) {
   return { sessions, last, prev, best };
 }
 
+function trackedExercises() {
+  return state.exercises
+    .map((exercise) => ({ exercise, sessions: progressForExercise(exercise.id), sets: setsForExercise(exercise.id) }))
+    .filter((item) => item.sets.length > 0)
+    .sort((a, b) => (b.sessions.at(-1)?.date || 0) - (a.sessions.at(-1)?.date || 0));
+}
+
 function setsByDay() {
   const grouped = new Map();
   state.sets
@@ -607,9 +614,20 @@ function renderMiniProgress(exerciseId) {
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
 }
 
-function renderProgress(selectedId = state.exercises[0]?.id) {
-  const selected = state.exercises.find((item) => item.id === selectedId) || state.exercises[0];
-  if (!selected) return `<section class="panel"><h1>Нет упражнений</h1></section>`;
+function renderProgress(selectedId) {
+  const tracked = trackedExercises();
+  const selected = tracked.find((item) => item.exercise.id === selectedId)?.exercise || tracked[0]?.exercise;
+  if (!selected) {
+    return `
+      <section class="progress-hero empty-progress">
+        <div>
+          <p class="eyebrow">Прогресс</p>
+          <h1>Здесь появится динамика после первых подходов</h1>
+        </div>
+        <button class="primary" data-action="home">Записать упражнение</button>
+      </section>
+    `;
+  }
   const sessions = progressForExercise(selected.id);
   const last = sessions.at(-1);
   const previous = sessions.at(-2);
@@ -623,23 +641,49 @@ function renderProgress(selectedId = state.exercises[0]?.id) {
   const fatigueChart = `chart-${chartRefs.length}`;
   chartRefs.push({ id: fatigueChart, values: fatigueValues, labels: sessions.filter((s) => s.fatigue != null).map((s) => formatDate(s.date)), type: "line", invert: true });
   return `
-    <section class="progress-top">
-      <h1>Прогресс</h1>
-      <select data-action="select-progress">
-        ${state.exercises.map((item) => `<option value="${item.id}" ${item.id === selected.id ? "selected" : ""}>${item.name}</option>`).join("")}
-      </select>
+    <section class="progress-hero">
+      <div>
+        <p class="eyebrow">Прогресс</p>
+        <h1>${selected.name}</h1>
+        <div class="progress-subline">
+          <span>${sessions.length} трен.</span>
+          <span>${setsForExercise(selected.id).length} подх.</span>
+          <span>${label(equipment, selected.equipmentType)}</span>
+        </div>
+      </div>
+      <div class="progress-score">
+        <span>Индекс формы</span>
+        <strong>${last ? formatWeight(last.score) : "—"}</strong>
+        <small>${last && previous ? trendText(last.score, previous.score) : "Нужна ещё одна точка"}</small>
+      </div>
     </section>
-    <section class="insight-grid">
-      <div class="insight"><span>Индекс формы</span><strong>${last ? formatWeight(last.score) : "—"}</strong><p>${last && previous ? trendText(last.score, previous.score) : "Нужна история"}</p></div>
-      <div class="insight"><span>Оценочный 1ПМ</span><strong>${last ? `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>Сравнивает разные веса и повторы</p></div>
-      <div class="insight"><span>Рабочий объём</span><strong>${last ? formatWeight(last.tonnage) : "—"}</strong><p>Килограммы × повторы за тренировку</p></div>
-      <div class="insight"><span>Средний запас</span><strong>${last ? formatWeight(last.avgReserve) : "—"}</strong><p>Больше при той же работе = лучше</p></div>
+    <section class="progress-picker">
+      ${tracked.map(({ exercise, sessions: itemSessions }) => {
+        const itemLast = itemSessions.at(-1);
+        const itemPrev = itemSessions.at(-2);
+        const delta = itemLast && itemPrev ? itemLast.score - itemPrev.score : null;
+        return `
+          <button class="${exercise.id === selected.id ? "active" : ""}" data-action="select-progress-card" data-id="${exercise.id}">
+            <span>${exercise.name}</span>
+            <strong>${itemLast ? formatWeight(itemLast.score) : "—"}</strong>
+            <small>${delta == null ? `${itemSessions.length} трен.` : trendText(itemLast.score, itemPrev.score)}</small>
+          </button>
+        `;
+      }).join("")}
+    </section>
+    <section class="progress-mosaic">
+      <div class="metric-tile strength"><span>Сила</span><strong>${last ? `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>оценочный 1ПМ</p></div>
+      <div class="metric-tile volume"><span>Объём</span><strong>${last ? formatWeight(last.tonnage) : "—"}</strong><p>рабочие кг×повт</p></div>
+      <div class="metric-tile reserve"><span>Запас</span><strong>${last ? formatWeight(last.avgReserve) : "—"}</strong><p>средний RIR 0-10</p></div>
+      <div class="metric-tile stability"><span>Серия</span><strong>${last?.fatigue != null ? formatWeight(last.fatigue) : "—"}</strong><p>падение меньше = лучше</p></div>
     </section>
     ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous)}</section>` : ""}
-    <section class="panel"><div class="section-head"><h2>Индекс формы</h2><span class="legend-dot">цвет точки = запас</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="220"></canvas><p class="muted">Индекс соединяет лучший рабочий e1RM и запас повторов. Разминка не раздувает показатель.</p>` : `<p class="muted">Нет данных.</p>`}</section>
-    <section class="panel"><div class="section-head"><h2>Рабочий объём</h2><span class="legend-dot">кг × повторы</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="220"></canvas><p class="muted">Показывает общий объём рабочих подходов за день.</p>` : `<p class="muted">Нет данных.</p>`}</section>
-    <section class="panel"><div class="section-head"><h2>Запас повторов</h2><span class="legend-dot">0 = отказ, 10 = легко</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="220"></canvas><p class="muted">Если вес и повторы прежние, но запас выше, форма стала лучше.</p>` : `<p class="muted">Нет данных.</p>`}</section>
-    <section class="panel"><div class="section-head"><h2>Падение по серии</h2><span class="legend-dot">меньше = устойчивее</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="220"></canvas><p class="muted">Сравнивает первый и последний рабочий подход внутри серии.</p>` : `<p class="muted">Появится, когда в тренировке будет два рабочих подхода.</p>`}</section>
+    <section class="chart-grid">
+      <div class="chart-panel primary-chart"><div class="section-head"><h2>Форма</h2><span class="legend-dot">точки окрашены запасом</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">Главная линия: сила с поправкой на запас. Разминка не раздувает показатель.</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>Объём</h2><span class="legend-dot">рабочие подходы</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">Сколько работы сделано за день.</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>Запас</h2><span class="legend-dot">0 отказ · 10 легко</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">Та же работа с большим запасом = прогресс.</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>
+    </section>
     <section class="panel">
       <h2>Последние тренировки</h2>
       ${sessions.length ? `<div class="session-list">${sessions.slice(-6).reverse().map(renderSessionSummary).join("")}</div>` : `<p class="muted">Нет данных.</p>`}
@@ -906,7 +950,7 @@ function bindEvents(root) {
     render();
   });
   root.querySelectorAll("[data-action='progress-exercise']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress", id: button.dataset.id })));
-  root.querySelector("[data-action='select-progress']")?.addEventListener("change", (event) => setRoute({ name: "progress", id: event.target.value }));
+  root.querySelectorAll("[data-action='select-progress-card']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress", id: button.dataset.id })));
   root.querySelector("[data-action='edit-exercise']")?.addEventListener("click", (event) => openEditDialog(event.currentTarget.dataset.id));
   root.querySelector("[data-action='close-exercise-editor']")?.addEventListener("click", () => {
     editingExerciseId = null;
