@@ -40,6 +40,7 @@ const seedExercises = [
 let state = loadState();
 let route = { name: "home" };
 let draftSet = { weight: "", reps: "8", reserve: 2, warmup: false };
+let draftCardio = { durationMin: "", distanceKm: "", setting: "" };
 let exerciseFormOpen = false;
 let chartRefs = [];
 let activeSetField = "weight";
@@ -104,11 +105,29 @@ function migrateState(input) {
     createdAt: exercise.createdAt || Date.now()
   }));
   migrated.sets = (input.sets || [])
-    .filter((set) => set.exerciseId && Number.isFinite(Number(set.weight)) && Number.isFinite(Number(set.reps)))
+    .filter((set) => {
+      const cardio = set.type === "cardio" || set.durationMin != null || set.distanceKm != null;
+      const strength = Number.isFinite(Number(set.weight)) && Number.isFinite(Number(set.reps));
+      return set.exerciseId && (cardio || strength);
+    })
     .map((set) => {
+      if (set.type === "cardio" || set.durationMin != null || set.distanceKm != null) {
+        const next = {
+          id: set.id || uid(),
+          type: "cardio",
+          exerciseId: set.exerciseId,
+          durationMin: Math.max(0, Number(set.durationMin) || 0),
+          distanceKm: Math.max(0, Number(set.distanceKm) || 0),
+          setting: set.setting != null ? String(set.setting) : "",
+          createdAt: set.createdAt || Date.now()
+        };
+        if (set.updatedAt) next.updatedAt = set.updatedAt;
+        return next;
+      }
       const reserve = set.reserve != null ? Number(set.reserve) : reserveValue(set);
       const next = {
         id: set.id || uid(),
+        type: "strength",
         exerciseId: set.exerciseId,
         weight: Number(set.weight),
         reps: Number(set.reps),
@@ -174,6 +193,22 @@ function e1rm(set) {
   return set.weight * (1 + set.reps / 30);
 }
 
+function isCardioExercise(exercise) {
+  return exercise?.category === "cardio" || exercise?.equipmentType === "cardio";
+}
+
+function isCardioSet(set) {
+  return set?.type === "cardio" || set?.durationMin != null || set?.distanceKm != null;
+}
+
+function isRowingExercise(exercise) {
+  return /греб|гребл|row/i.test(exercise?.name || "");
+}
+
+function isEllipticalExercise(exercise) {
+  return /эллип|ellipt/i.test(exercise?.name || "");
+}
+
 function reserveValue(set) {
   if (set.reserve != null) return set.reserve;
   if (set.effort == null) return 0;
@@ -194,10 +229,62 @@ function reserveColor(value) {
 }
 
 function adjustedScore(set) {
+  if (isCardioSet(set)) return cardioScore(set);
   const base = e1rm(set);
   const reserveBonus = 1 + Math.min(6, Math.max(0, reserveValue(set))) * 0.012;
   const warmupPenalty = set.warmup ? 0.72 : 1;
   return base * reserveBonus * warmupPenalty;
+}
+
+function cardioSpeed(set) {
+  const duration = Number(set.durationMin) || 0;
+  const distance = Number(set.distanceKm) || 0;
+  return duration > 0 ? distance / duration * 60 : 0;
+}
+
+function cardioPace(set) {
+  const distance = Number(set.distanceKm) || 0;
+  const duration = Number(set.durationMin) || 0;
+  return distance > 0 ? duration / distance : null;
+}
+
+function cardioScore(set) {
+  const distance = Number(set.distanceKm) || 0;
+  const duration = Number(set.durationMin) || 0;
+  const speed = cardioSpeed(set);
+  return distance > 0 ? distance * 100 + speed * 6 : duration * 4;
+}
+
+function formatDuration(minutes) {
+  const safe = Math.max(0, Number(minutes) || 0);
+  const whole = Math.floor(safe);
+  const seconds = Math.round((safe - whole) * 60);
+  return seconds ? `${whole}:${String(seconds).padStart(2, "0")}` : `${whole} мин`;
+}
+
+function formatPace(minutesPerKm) {
+  if (minutesPerKm == null || !Number.isFinite(minutesPerKm)) return "—";
+  const minutes = Math.floor(minutesPerKm);
+  const seconds = Math.round((minutesPerKm - minutes) * 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")} /км`;
+}
+
+function formatClockMinutes(minutes) {
+  if (minutes == null || !Number.isFinite(minutes)) return "—";
+  const totalSeconds = Math.round(minutes * 60);
+  const min = Math.floor(totalSeconds / 60);
+  const sec = totalSeconds % 60;
+  return `${min}:${String(sec).padStart(2, "0")}`;
+}
+
+function row3000Equivalent(setOrSession) {
+  const duration = Number(setOrSession.durationMin) || 0;
+  const distance = Number(setOrSession.distanceKm) || 0;
+  return duration > 0 && distance > 0 ? duration * 3 / distance : null;
+}
+
+function rowNormsText() {
+  return "Нормы из Android: муж. 18-29 13:30, 30-39 14:00, 40-49 14:30, 50+ 15:00; жен. 15:00.";
 }
 
 function setsForExercise(exerciseId) {
@@ -217,6 +304,31 @@ function groupSetsByWorkout(sets) {
 }
 
 function sessionMetrics(items) {
+  if (items.some(isCardioSet)) {
+    const cardio = items.filter(isCardioSet);
+    const durationMin = cardio.reduce((sum, set) => sum + (Number(set.durationMin) || 0), 0);
+    const distanceKm = cardio.reduce((sum, set) => sum + (Number(set.distanceKm) || 0), 0);
+    const speedKmh = durationMin > 0 ? distanceKm / durationMin * 60 : 0;
+    const pace = distanceKm > 0 ? durationMin / distanceKm : null;
+    const score = distanceKm > 0 ? distanceKm * 100 + speedKmh * 6 : durationMin * 4;
+    return {
+      type: "cardio",
+      date: items[0]?.createdAt || Date.now(),
+      count: cardio.length,
+      workCount: cardio.length,
+      warmupCount: 0,
+      durationMin,
+      distanceKm,
+      speedKmh,
+      pace,
+      score,
+      tonnage: 0,
+      pureE1rm: 0,
+      avgReserve: 0,
+      fatigue: null,
+      top: cardio.reduce((best, set) => (cardioScore(set) > cardioScore(best || set) ? set : best), cardio[0])
+    };
+  }
   const work = items.filter((set) => !set.warmup);
   const source = work.length ? work : items;
   const top = source.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), source[0]);
@@ -305,14 +417,20 @@ function setsByDay() {
 }
 
 function daySummary(items) {
-  const work = items.filter((set) => !set.warmup);
+  const work = items.filter((set) => !isCardioSet(set) && !set.warmup);
+  const cardio = items.filter(isCardioSet);
   const exerciseIds = new Set(items.map((set) => set.exerciseId));
   const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
+  const distanceKm = cardio.reduce((sum, set) => sum + (Number(set.distanceKm) || 0), 0);
+  const durationMin = cardio.reduce((sum, set) => sum + (Number(set.durationMin) || 0), 0);
   const top = work.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), work[0] || null);
   return {
     exerciseCount: exerciseIds.size,
     setCount: items.length,
     workCount: work.length,
+    cardioCount: cardio.length,
+    distanceKm,
+    durationMin,
     tonnage,
     top
   };
@@ -424,6 +542,7 @@ function renderHome() {
           <span>${todaySummary.exerciseCount} упр.</span>
           <span>${todaySummary.workCount} рабочих</span>
           <span>${formatWeight(todaySummary.tonnage)} кг×повт</span>
+          ${todaySummary.cardioCount ? `<span>${formatWeight(todaySummary.distanceKm)} км кардио</span>` : ""}
         </div>
       </section>
     ` : ""}
@@ -503,6 +622,7 @@ function renderExerciseEditor() {
 function renderExercise(exerciseId) {
   const exercise = state.exercises.find((item) => item.id === exerciseId);
   if (!exercise) return `<section class="panel"><h1>Упражнение не найдено</h1></section>`;
+  const isCardio = isCardioExercise(exercise);
   const allSets = setsForExercise(exerciseId);
   const todaySets = allSets.filter((set) => dayKey(set.createdAt) === dayKey(Date.now()));
   const sessions = progressForExercise(exerciseId);
@@ -528,44 +648,10 @@ function renderExercise(exerciseId) {
     </section>
     <section class="metrics-row">
       <div><span>Сегодня</span><strong>${todaySets.length}</strong></div>
-      <div><span>Лучший индекс</span><strong>${last ? formatWeight(Math.max(...sessions.map((s) => s.score))) : "—"}</strong></div>
+      <div><span>${isCardio ? "Всего сегодня" : "Лучший индекс"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + (Number(set.durationMin) || 0), 0)) : last ? formatWeight(Math.max(...sessions.map((s) => s.score))) : "—"}</strong></div>
       <div><span>Динамика</span><strong>${last && previous ? trendText(last.score, previous.score) : "—"}</strong></div>
     </section>
-    <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}">
-      ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
-      <div class="quick-row">
-        ${allSets.at(-1) ? `<button type="button" data-action="repeat-last" data-weight="${allSets.at(-1).weight}" data-reps="${allSets.at(-1).reps}" data-reserve="${reserveValue(allSets.at(-1))}">Повторить последний: ${formatWeight(allSets.at(-1).weight)} × ${allSets.at(-1).reps}</button>` : ""}
-        ${previous ? `<button type="button" data-action="repeat-best" data-weight="${previous.top.weight}" data-reps="${previous.top.reps}" data-reserve="${reserveValue(previous.top)}">Лучший прошлый: ${formatWeight(previous.top.weight)} × ${previous.top.reps}</button>` : ""}
-        <button type="button" data-action="set-reserve" data-reserve="2">Рабочий запас 2</button>
-        <button type="button" data-action="set-reserve" data-reserve="6">Разминка запас 6</button>
-      </div>
-      <div class="input-pair">
-        <label class="number-control">
-          <span>Вес вместе со штангой</span>
-          <div>
-            <button type="button" data-step-field="weight" data-delta="-2.5">−</button>
-            <input inputmode="none" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" />
-            <button type="button" data-step-field="weight" data-delta="2.5">+</button>
-          </div>
-        </label>
-        <label class="number-control">
-          <span>Повторы</span>
-          <div>
-            <button type="button" data-step-field="reps" data-delta="-1">−</button>
-            <input inputmode="none" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" />
-            <button type="button" data-step-field="reps" data-delta="1">+</button>
-          </div>
-        </label>
-      </div>
-      ${renderKeypad()}
-      <label class="effort-label">
-        <span>Запас повторов: <strong id="reserveText">${reserveName(formValues.reserve)}</strong></span>
-        <input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" />
-      </label>
-      <label class="warmup-toggle"><input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} /> Разминка</label>
-      ${renderSetComparison(exercise.id, formValues)}
-      <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
-    </form>
+    ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, allSets, previous)}
     <section class="panel">
       <div class="section-head"><h2>Подходы сегодня</h2><span>${formatDate(Date.now())}</span></div>
       ${todaySets.length ? `<div class="sets-list">${todaySets.map(renderSetRow).join("")}</div>` : `<p class="muted">Сегодня по этому упражнению ещё нет подходов.</p>`}
@@ -574,6 +660,59 @@ function renderExercise(exerciseId) {
       <div class="section-head"><h2>Прогресс упражнения</h2><button data-action="progress-exercise" data-id="${exercise.id}">Подробнее</button></div>
       ${renderMiniProgress(exercise.id)}
     </section>
+  `;
+}
+
+function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous) {
+  return `
+    <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
+      ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
+      <div class="quick-row">
+        ${allSets.at(-1) && !isCardioSet(allSets.at(-1)) ? `<button type="button" data-action="repeat-last" data-weight="${allSets.at(-1).weight}" data-reps="${allSets.at(-1).reps}" data-reserve="${reserveValue(allSets.at(-1))}">Повторить последний: ${formatWeight(allSets.at(-1).weight)} × ${allSets.at(-1).reps}</button>` : ""}
+        ${previous?.top && !isCardioSet(previous.top) ? `<button type="button" data-action="repeat-best" data-weight="${previous.top.weight}" data-reps="${previous.top.reps}" data-reserve="${reserveValue(previous.top)}">Лучший прошлый: ${formatWeight(previous.top.weight)} × ${previous.top.reps}</button>` : ""}
+        <button type="button" data-action="set-reserve" data-reserve="2">Рабочий запас 2</button>
+        <button type="button" data-action="set-reserve" data-reserve="6">Разминка запас 6</button>
+      </div>
+      <div class="input-pair">
+        <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-2.5">−</button><input inputmode="none" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="2.5">+</button></div></label>
+        <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="none" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
+      </div>
+      ${renderKeypad()}
+      <label class="effort-label"><span>Запас повторов: <strong id="reserveText">${reserveName(formValues.reserve)}</strong></span><input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" /></label>
+      <label class="warmup-toggle"><input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} /> Разминка</label>
+      ${renderSetComparison(exercise.id, formValues)}
+      <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
+    </form>
+  `;
+}
+
+function renderCardioEntry(exercise, editingSet) {
+  const values = editingSet && isCardioSet(editingSet)
+    ? { durationMin: String(editingSet.durationMin || ""), distanceKm: String(editingSet.distanceKm || ""), setting: String(editingSet.setting || "") }
+    : draftCardio;
+  const rowing = isRowingExercise(exercise);
+  const elliptical = isEllipticalExercise(exercise);
+  return `
+    <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="cardio">
+      ${editingSet ? `<div class="edit-banner"><strong>Редактирование кардио</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
+      <div class="quick-row">
+        ${rowing ? `<button type="button" data-action="cardio-distance" data-distance="3">3000 м</button><button type="button" data-action="cardio-setting" data-setting="9">Заслонка 9</button>` : ""}
+        ${elliptical ? `<button type="button" data-action="cardio-duration" data-duration="8">8 мин разогрев</button>` : ""}
+        <button type="button" data-action="cardio-duration" data-duration="10">10 мин</button>
+        <button type="button" data-action="cardio-duration" data-duration="20">20 мин</button>
+      </div>
+      <div class="input-pair cardio-pair">
+        <label class="number-control"><span>Время, мин</span><input inputmode="decimal" name="durationMin" min="0.1" required value="${values.durationMin}" placeholder="20" /></label>
+        <label class="number-control"><span>Дистанция, км</span><input inputmode="decimal" name="distanceKm" min="0.01" required value="${values.distanceKm}" placeholder="${rowing ? "3.0" : "1.5"}" /></label>
+      </div>
+      <label class="number-control cardio-setting"><span>Настройка тренажёра</span><input inputmode="decimal" name="setting" value="${values.setting || ""}" placeholder="например 9" /></label>
+      <div class="cardio-context">
+        ${rowing ? `<strong>Гребля: цель фит-теста 3000 м</strong><span>${rowNormsText()}</span><span>Заслонка/настройка сохраняется как контекст и не влияет на индекс.</span>` : ""}
+        ${elliptical ? `<strong>Эллипс: спокойное кардио</strong><span>Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.</span>` : ""}
+        ${!rowing && !elliptical ? `<span>Настройка сохраняется как контекст. Она не считается сложностью и не влияет на прогресс.</span>` : ""}
+      </div>
+      <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать кардио"}</button>
+    </form>
   `;
 }
 
@@ -605,6 +744,19 @@ function renderSetComparison(exerciseId, formValues) {
 }
 
 function renderSetRow(set) {
+  if (isCardioSet(set)) {
+    const pace = cardioPace(set);
+    return `
+      <div class="set-row cardio-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}">
+        <strong>${formatDuration(set.durationMin)} · ${formatWeight(Number(set.distanceKm) || 0)} км</strong>
+        <span>${formatWeight(cardioSpeed(set))} км/ч · ${formatPace(pace)}${set.setting ? ` · настройка ${set.setting}` : ""} · ${formatDateTime(set.createdAt)}</span>
+        <div class="set-actions">
+          <button data-action="edit-set" data-id="${set.id}" aria-label="Редактировать кардио">✎</button>
+          <button data-action="delete-set" data-id="${set.id}" aria-label="Удалить запись">×</button>
+        </div>
+      </div>
+    `;
+  }
   return `
     <div class="set-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}">
       <strong>${formatWeight(set.weight)} кг × ${set.reps}</strong>
@@ -634,14 +786,17 @@ function renderKeypad() {
 function renderMiniProgress(exerciseId) {
   const sessions = progressForExercise(exerciseId);
   if (sessions.length < 1) return `<p class="muted">Запишите хотя бы один подход.</p>`;
+  const cardio = sessions.some((s) => s.type === "cardio");
   const id = `chart-${chartRefs.length}`;
   chartRefs.push({
     id,
     values: sessions.map((s) => s.score),
     labels: sessions.map((s) => formatDate(s.date)),
     type: "line",
-    pointValues: sessions.map((s) => s.avgReserve),
-    details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.avgReserve)} запас`)
+    pointValues: cardio ? null : sessions.map((s) => s.avgReserve),
+    details: sessions.map((s) => cardio
+      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.distanceKm)} км`
+      : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.avgReserve)} запас`)
   });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
 }
@@ -660,6 +815,8 @@ function renderProgress(selectedId) {
       </section>
     `;
   }
+  const selectedIsCardio = isCardioExercise(selected);
+  const selectedIsRowing = isRowingExercise(selected);
   const sessions = progressForExercise(selected.id);
   const overall = overallProgressSeries();
   const last = sessions.at(-1);
@@ -670,24 +827,30 @@ function renderProgress(selectedId) {
     values: sessions.map((s) => s.score),
     labels: sessions.map((s) => formatDate(s.date)),
     type: "line",
-    pointValues: sessions.map((s) => s.avgReserve),
-    details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.top.weight)}×${s.top.reps}`)
+    pointValues: selectedIsCardio ? null : sessions.map((s) => s.avgReserve),
+    details: sessions.map((s) => selectedIsCardio
+      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDuration(s.durationMin)}`
+      : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.top.weight)}×${s.top.reps}`)
   });
   const volumeChart = `chart-${chartRefs.length}`;
   chartRefs.push({
     id: volumeChart,
-    values: sessions.map((s) => s.tonnage),
+    values: sessions.map((s) => selectedIsCardio ? s.distanceKm : s.tonnage),
     labels: sessions.map((s) => formatDate(s.date)),
     type: "bar",
-    details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.tonnage)} кг×повт · ${s.workCount} рабочих`)
+    details: sessions.map((s) => selectedIsCardio
+      ? `${formatDate(s.date)} · ${formatWeight(s.distanceKm)} км · ${formatDuration(s.durationMin)}`
+      : `${formatDate(s.date)} · ${formatWeight(s.tonnage)} кг×повт · ${s.workCount} рабочих`)
   });
   const reserveChart = `chart-${chartRefs.length}`;
   chartRefs.push({
     id: reserveChart,
-    values: sessions.map((s) => s.avgReserve),
+    values: sessions.map((s) => selectedIsCardio ? s.speedKmh : s.avgReserve),
     labels: sessions.map((s) => formatDate(s.date)),
     type: "line",
-    details: sessions.map((s) => `${formatDate(s.date)} · запас ${formatWeight(s.avgReserve)} · ${s.workCount} рабочих`)
+    details: sessions.map((s) => selectedIsCardio
+      ? `${formatDate(s.date)} · ${formatWeight(s.speedKmh)} км/ч · темп ${formatPace(s.pace)}`
+      : `${formatDate(s.date)} · запас ${formatWeight(s.avgReserve)} · ${s.workCount} рабочих`)
   });
   const fatigueValues = sessions.map((s) => s.fatigue).filter((v) => v != null);
   const fatigueChart = `chart-${chartRefs.length}`;
@@ -715,7 +878,7 @@ function renderProgress(selectedId) {
         <h1>${selected.name}</h1>
         <div class="progress-subline">
           <span>${sessions.length} трен.</span>
-          <span>${setsForExercise(selected.id).length} подх.</span>
+          <span>${setsForExercise(selected.id).length} ${selectedIsCardio ? "зап." : "подх."}</span>
           <span>${label(equipment, selected.equipmentType)}</span>
         </div>
       </div>
@@ -743,17 +906,17 @@ function renderProgress(selectedId) {
       </div>
     </section>
     <section class="progress-mosaic">
-      <div class="metric-tile strength"><span>Сила</span><strong>${last ? `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>оценочный 1ПМ</p></div>
-      <div class="metric-tile volume"><span>Объём</span><strong>${last ? formatWeight(last.tonnage) : "—"}</strong><p>рабочие кг×повт</p></div>
-      <div class="metric-tile reserve"><span>Запас</span><strong>${last ? formatWeight(last.avgReserve) : "—"}</strong><p>средний RIR 0-10</p></div>
-      <div class="metric-tile stability"><span>Серия</span><strong>${last?.fatigue != null ? formatWeight(last.fatigue) : "—"}</strong><p>падение меньше = лучше</p></div>
+      <div class="metric-tile strength"><span>${selectedIsCardio ? "Дистанция" : "Сила"}</span><strong>${last ? selectedIsCardio ? `${formatWeight(last.distanceKm)} км` : `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>${selectedIsCardio ? "за последнюю сессию" : "оценочный 1ПМ"}</p></div>
+      <div class="metric-tile volume"><span>${selectedIsCardio ? "Время" : "Объём"}</span><strong>${last ? selectedIsCardio ? formatDuration(last.durationMin) : formatWeight(last.tonnage) : "—"}</strong><p>${selectedIsCardio ? "минуты работы" : "рабочие кг×повт"}</p></div>
+      <div class="metric-tile reserve"><span>${selectedIsCardio ? "Скорость" : "Запас"}</span><strong>${last ? selectedIsCardio ? `${formatWeight(last.speedKmh)} км/ч` : formatWeight(last.avgReserve) : "—"}</strong><p>${selectedIsCardio ? "средняя" : "средний RIR 0-10"}</p></div>
+      <div class="metric-tile stability"><span>${selectedIsCardio ? selectedIsRowing ? "3000 м" : "Темп" : "Серия"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatClockMinutes(row3000Equivalent(last)) : formatPace(last.pace) : last.fatigue != null ? formatWeight(last.fatigue) : "—" : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "эквивалент по темпу" : "мин/км" : "падение меньше = лучше"}</p></div>
     </section>
-    ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous)}</section>` : ""}
+    ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous, selected)}</section>` : ""}
     <section class="chart-grid">
-      <div class="chart-panel primary-chart"><div class="section-head"><h2>Форма</h2><span class="legend-dot">точки окрашены запасом</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">Главная линия: сила с поправкой на запас. Разминка не раздувает показатель.</p>` : `<p class="muted">Нет данных.</p>`}</div>
-      <div class="chart-panel"><div class="section-head"><h2>Объём</h2><span class="legend-dot">рабочие подходы</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">Сколько работы сделано за день.</p>` : `<p class="muted">Нет данных.</p>`}</div>
-      <div class="chart-panel"><div class="section-head"><h2>Запас</h2><span class="legend-dot">0 отказ · 10 легко</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">Та же работа с большим запасом = прогресс.</p>` : `<p class="muted">Нет данных.</p>`}</div>
-      <div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>
+      <div class="chart-panel primary-chart"><div class="section-head"><h2>${selectedIsCardio ? "Кардио индекс" : "Форма"}</h2><span class="legend-dot">${selectedIsCardio ? "дистанция + скорость" : "точки окрашены запасом"}</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">${selectedIsCardio ? "Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории." : "Главная линия: сила с поправкой на запас. Разминка не раздувает показатель."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Дистанция" : "Объём"}</h2><span class="legend-dot">${selectedIsCardio ? "км" : "рабочие подходы"}</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Сколько километров набрано за сессию." : "Сколько работы сделано за день."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      ${selectedIsCardio ? "" : `<div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>`}
     </section>
     <section class="panel">
       <h2>Последние тренировки</h2>
@@ -766,7 +929,29 @@ function renderProgress(selectedId) {
   `;
 }
 
-function renderProgressNote(last, previous) {
+function renderProgressNote(last, previous, exercise) {
+  if (last.type === "cardio") {
+    const rowEquivalent = isRowingExercise(exercise) ? row3000Equivalent(last) : null;
+    if (!previous) {
+      return `
+        <h2>Вывод</h2>
+        <p class="muted">${rowEquivalent ? `Первая точка по гребле: эквивалент 3000 м ${formatClockMinutes(rowEquivalent)}. ${rowNormsText()}` : "Есть первая кардио-точка. Следующая тренировка даст сравнение скорости, дистанции и времени."}</p>
+      `;
+    }
+    const speedDelta = last.speedKmh - previous.speedKmh;
+    const distanceDelta = last.distanceKm - previous.distanceKm;
+    const durationDelta = last.durationMin - previous.durationMin;
+    return `
+      <h2>Вывод</h2>
+      <p>${speedDelta >= 0 ? "средняя скорость выше" : "средняя скорость ниже"}, ${distanceDelta >= 0 ? "дистанция выше" : "дистанция ниже"}, ${durationDelta >= 0 ? "времени больше" : "времени меньше"}.</p>
+      ${rowEquivalent ? `<p class="muted">Эквивалент 3000 м: ${formatClockMinutes(rowEquivalent)}. ${rowNormsText()}</p>` : ""}
+      <div class="mini-metrics">
+        <span>${trendText(last.speedKmh, previous.speedKmh, " км/ч")}</span>
+        <span>${trendText(last.distanceKm, previous.distanceKm, " км")}</span>
+        <span>${trendText(last.durationMin, previous.durationMin, " мин")}</span>
+      </div>
+    `;
+  }
   if (!previous) {
     return `<h2>Вывод</h2><p class="muted">Есть первая точка. Следующая тренировка даст сравнение.</p>`;
   }
@@ -791,6 +976,20 @@ function renderProgressNote(last, previous) {
 
 function renderSessionSummary(session) {
   const pr = session.score === Math.max(...progressForExercise(session.top.exerciseId).map((item) => item.score));
+  if (session.type === "cardio") {
+    return `
+      <article class="session-summary">
+        <div>
+          <strong>${formatDate(session.date)}${pr ? " · лучший" : ""}</strong>
+          <span>${session.count} зап. · ${formatDuration(session.durationMin)}</span>
+        </div>
+        <div>
+          <strong>${formatWeight(session.distanceKm)} км · ${formatWeight(session.speedKmh)} км/ч</strong>
+          <span>${formatWeight(session.score)} индекс · темп ${formatPace(session.pace)}</span>
+        </div>
+      </article>
+    `;
+  }
   return `
     <article class="session-summary">
       <div>
@@ -865,17 +1064,18 @@ function renderHistoryDay(key, items) {
   return `
     <section class="panel history-day">
       <button class="day-toggle" data-action="history-day" data-day="${key}">
-        <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт</small></span>
+        <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт${summary.cardioCount ? ` · ${formatWeight(summary.distanceKm)} км` : ""}</small></span>
         <span>${expanded ? "Свернуть" : "Открыть"}</span>
       </button>
       ${expanded ? exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
         const exerciseKey = `${key}:${exerciseId}`;
         const exerciseExpanded = expandedHistoryExercises.has(exerciseKey);
+        const cardio = metrics.type === "cardio";
         return `
           <article class="history-exercise">
             <button class="exercise-toggle" data-action="history-exercise" data-key="${exerciseKey}">
               <span>${exercise?.name || "Удалённое упражнение"}</span>
-              <small>${metrics.workCount} раб. · ${formatWeight(metrics.tonnage)} объём · ${metrics.top ? `${formatWeight(metrics.top.weight)} × ${metrics.top.reps}` : "нет рабочих"}</small>
+              <small>${cardio ? `${metrics.count} зап. · ${formatDuration(metrics.durationMin)} · ${formatWeight(metrics.distanceKm)} км` : `${metrics.workCount} раб. · ${formatWeight(metrics.tonnage)} объём · ${metrics.top ? `${formatWeight(metrics.top.weight)} × ${metrics.top.reps}` : "нет рабочих"}`}</small>
             </button>
             ${exerciseExpanded ? `<div class="sets-list">${sets.map(renderSetRow).join("")}</div>` : ""}
           </article>
@@ -1004,6 +1204,29 @@ function bindEvents(root) {
     }
     root.querySelector("#reserveText").textContent = reserveName(reserve);
   }));
+  root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set'][data-kind='cardio']");
+    if (!form) return;
+    form.elements.durationMin.value = button.dataset.duration;
+    if (!editingSetId) draftCardio.durationMin = button.dataset.duration;
+  }));
+  root.querySelectorAll("[data-action='cardio-distance']").forEach((button) => button.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set'][data-kind='cardio']");
+    if (!form) return;
+    form.elements.distanceKm.value = button.dataset.distance;
+    if (!editingSetId) draftCardio.distanceKm = button.dataset.distance;
+  }));
+  root.querySelectorAll("[data-action='cardio-setting']").forEach((button) => button.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set'][data-kind='cardio']");
+    if (!form) return;
+    form.elements.setting.value = button.dataset.setting;
+    if (!editingSetId) draftCardio.setting = button.dataset.setting;
+  }));
+  root.querySelectorAll("[name='durationMin'], [name='distanceKm'], [name='setting']").forEach((input) => input.addEventListener("input", () => {
+    const form = input.closest("[data-form='set'][data-kind='cardio']");
+    if (!form || editingSetId) return;
+    draftCardio[input.name] = input.value;
+  }));
   root.querySelectorAll("[data-action='repeat-last'], [data-action='repeat-best']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set']");
     form.elements.weight.value = button.dataset.weight;
@@ -1096,15 +1319,55 @@ function saveSet(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
+  const existing = state.sets.find((set) => set.id === editingSetId);
+  if (form.dataset.kind === "cardio") {
+    const durationMin = Number(String(data.get("durationMin")).replace(",", "."));
+    const distanceKm = Number(String(data.get("distanceKm")).replace(",", "."));
+    const setting = String(data.get("setting") || "").trim();
+    if (!Number.isFinite(durationMin) || durationMin <= 0 || !Number.isFinite(distanceKm) || distanceKm <= 0) return;
+    if (existing) {
+      existing.type = "cardio";
+      existing.durationMin = durationMin;
+      existing.distanceKm = distanceKm;
+      existing.setting = setting;
+      delete existing.weight;
+      delete existing.reps;
+      delete existing.reserve;
+      delete existing.effort;
+      delete existing.warmup;
+      existing.updatedAt = Date.now();
+      lastTouchedSetId = existing.id;
+      editingSetId = null;
+    } else {
+      const id = uid();
+      state.sets.push({
+        id,
+        type: "cardio",
+        exerciseId: form.dataset.id,
+        durationMin,
+        distanceKm,
+        setting,
+        createdAt: Date.now()
+      });
+      lastTouchedSetId = id;
+      draftCardio = { durationMin: String(durationMin), distanceKm: String(distanceKm), setting };
+    }
+    saveState();
+    render();
+    return;
+  }
   const weight = Number(String(data.get("weight")).replace(",", "."));
   const reps = Number(data.get("reps"));
   if (!Number.isFinite(weight) || weight <= 0 || !Number.isInteger(reps) || reps <= 0) return;
   const reserve = Number(data.get("reserve"));
-  const existing = state.sets.find((set) => set.id === editingSetId);
   if (existing) {
+    existing.type = "strength";
     existing.weight = weight;
     existing.reps = reps;
     existing.reserve = reserve;
+    delete existing.durationMin;
+    delete existing.distanceKm;
+    delete existing.setting;
     delete existing.effort;
     existing.warmup = data.get("warmup") === "on";
     existing.updatedAt = Date.now();
@@ -1114,6 +1377,7 @@ function saveSet(event) {
     const id = uid();
     state.sets.push({
       id,
+      type: "strength",
       exerciseId: form.dataset.id,
       weight,
       reps,

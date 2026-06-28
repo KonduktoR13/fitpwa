@@ -430,6 +430,31 @@ h3 {
   box-shadow: 0 0 0 3px rgb(29 119 93 / 0.14);
 }
 
+.cardio-pair {
+  grid-template-columns: 1fr 1fr;
+}
+
+.cardio-setting {
+  margin-top: 12px;
+}
+
+.cardio-context {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--line));
+  border-radius: 8px;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--primary) 7%, #fff);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.cardio-context strong {
+  color: var(--text);
+}
+
 .keypad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
