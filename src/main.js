@@ -1,7 +1,7 @@
 import "./styles.css";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
-const DATA_VERSION = 4;
+const DATA_VERSION = 5;
 const categories = [
   ["push", "Жим"],
   ["pull", "Тяга"],
@@ -41,7 +41,7 @@ const seedExercises = [
 let state = loadState();
 let route = { name: "home" };
 let draftSet = { weight: "", reps: "8", reserve: 2, warmup: false };
-let draftCardio = { durationMin: "", distanceKm: "", setting: "" };
+let draftCardio = { minutes: "", seconds: "", distanceM: "", setting: "" };
 let exerciseFormOpen = false;
 let chartRefs = [];
 let activeSetField = "weight";
@@ -118,18 +118,24 @@ function migrateState(input) {
   }
   migrated.sets = (input.sets || [])
     .filter((set) => {
-      const cardio = set.type === "cardio" || set.durationMin != null || set.distanceKm != null;
+      const cardio = set.type === "cardio" || set.durationSec != null || set.distanceM != null || set.durationMin != null || set.distanceKm != null;
       const strength = Number.isFinite(Number(set.weight)) && Number.isFinite(Number(set.reps));
       return set.exerciseId && (cardio || strength);
     })
     .map((set) => {
-      if (set.type === "cardio" || set.durationMin != null || set.distanceKm != null) {
+      if (set.type === "cardio" || set.durationSec != null || set.distanceM != null || set.durationMin != null || set.distanceKm != null) {
+        const durationSec = set.durationSec != null
+          ? Number(set.durationSec)
+          : (Number(set.durationMin) || 0) * 60;
+        const distanceM = set.distanceM != null
+          ? Number(set.distanceM)
+          : (Number(set.distanceKm) || 0) * 1000;
         const next = {
           id: set.id || uid(),
           type: "cardio",
           exerciseId: set.exerciseId,
-          durationMin: Math.max(0, Number(set.durationMin) || 0),
-          distanceKm: Math.max(0, Number(set.distanceKm) || 0),
+          durationSec: Math.max(0, Math.round(Number.isFinite(durationSec) ? durationSec : 0)),
+          distanceM: Math.max(0, Math.round(Number.isFinite(distanceM) ? distanceM : 0)),
           setting: set.setting != null ? String(set.setting) : "",
           createdAt: set.createdAt || Date.now()
         };
@@ -210,7 +216,7 @@ function isCardioExercise(exercise) {
 }
 
 function isCardioSet(set) {
-  return set?.type === "cardio" || set?.durationMin != null || set?.distanceKm != null;
+  return set?.type === "cardio" || set?.durationSec != null || set?.distanceM != null || set?.durationMin != null || set?.distanceKm != null;
 }
 
 function isRowingExercise(exercise) {
@@ -248,51 +254,82 @@ function adjustedScore(set) {
   return base * reserveBonus * warmupPenalty;
 }
 
+function cardioDurationSec(set) {
+  if (set?.durationSec != null) return Number(set.durationSec) || 0;
+  return (Number(set?.durationMin) || 0) * 60;
+}
+
+function cardioDistanceM(set) {
+  if (set?.distanceM != null) return Number(set.distanceM) || 0;
+  return (Number(set?.distanceKm) || 0) * 1000;
+}
+
+function cardioDistanceKm(set) {
+  return cardioDistanceM(set) / 1000;
+}
+
 function cardioSpeed(set) {
-  const duration = Number(set.durationMin) || 0;
-  const distance = Number(set.distanceKm) || 0;
-  return duration > 0 ? distance / duration * 60 : 0;
+  const durationSec = cardioDurationSec(set);
+  const distanceKm = cardioDistanceKm(set);
+  return durationSec > 0 ? distanceKm / durationSec * 3600 : 0;
 }
 
 function cardioPace(set) {
-  const distance = Number(set.distanceKm) || 0;
-  const duration = Number(set.durationMin) || 0;
-  return distance > 0 ? duration / distance : null;
+  const distanceKm = cardioDistanceKm(set);
+  const durationSec = cardioDurationSec(set);
+  return distanceKm > 0 ? durationSec / distanceKm : null;
 }
 
 function cardioScore(set) {
-  const distance = Number(set.distanceKm) || 0;
-  const duration = Number(set.durationMin) || 0;
+  const distance = cardioDistanceKm(set);
+  const durationSec = cardioDurationSec(set);
   const speed = cardioSpeed(set);
-  return distance > 0 ? distance * 100 + speed * 6 : duration * 4;
+  return distance > 0 ? distance * 100 + speed * 6 : durationSec / 60 * 4;
 }
 
-function formatDuration(minutes) {
-  const safe = Math.max(0, Number(minutes) || 0);
-  const whole = Math.floor(safe);
-  const seconds = Math.round((safe - whole) * 60);
-  return seconds ? `${whole}:${String(seconds).padStart(2, "0")}` : `${whole} мин`;
+function formatDuration(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return "—";
+  const safe = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(safe / 60);
+  const sec = safe % 60;
+  return `${minutes}:${String(sec).padStart(2, "0")}`;
 }
 
-function formatPace(minutesPerKm) {
-  if (minutesPerKm == null || !Number.isFinite(minutesPerKm)) return "—";
-  const minutes = Math.floor(minutesPerKm);
-  const seconds = Math.round((minutesPerKm - minutes) * 60);
+function formatDistanceMeters(value) {
+  const meters = Math.max(0, Math.round(Number(value) || 0));
+  return meters >= 1000 && meters % 1000 === 0 ? `${meters / 1000} км` : `${meters} м`;
+}
+
+function formatDistanceKm(value) {
+  return `${formatWeight(Number(value) || 0)} км`;
+}
+
+function formatPace(secondsPerKm) {
+  if (secondsPerKm == null || !Number.isFinite(secondsPerKm)) return "—";
+  const safe = Math.max(0, Math.round(secondsPerKm));
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")} /км`;
 }
 
-function formatClockMinutes(minutes) {
-  if (minutes == null || !Number.isFinite(minutes)) return "—";
-  const totalSeconds = Math.round(minutes * 60);
-  const min = Math.floor(totalSeconds / 60);
-  const sec = totalSeconds % 60;
-  return `${min}:${String(sec).padStart(2, "0")}`;
+function rowingSplit500(setOrSession) {
+  const durationSec = cardioDurationSec(setOrSession);
+  const distanceM = cardioDistanceM(setOrSession);
+  return durationSec > 0 && distanceM > 0 ? durationSec * 500 / distanceM : null;
 }
 
 function row3000Equivalent(setOrSession) {
-  const duration = Number(setOrSession.durationMin) || 0;
-  const distance = Number(setOrSession.distanceKm) || 0;
-  return duration > 0 && distance > 0 ? duration * 3 / distance : null;
+  const durationSec = cardioDurationSec(setOrSession);
+  const distanceM = cardioDistanceM(setOrSession);
+  return durationSec > 0 && distanceM > 0 ? durationSec * 3000 / distanceM : null;
+}
+
+function rowing3000Label(setOrSession) {
+  const distanceM = cardioDistanceM(setOrSession);
+  const equivalent = row3000Equivalent(setOrSession);
+  if (equivalent == null) return "3000 м: —";
+  const exact = Math.abs(distanceM - 3000) < 1;
+  return `${exact ? "3000 м" : "3000 м расч."}: ${formatDuration(equivalent)}`;
 }
 
 function rowNormsText() {
@@ -318,18 +355,21 @@ function groupSetsByWorkout(sets) {
 function sessionMetrics(items) {
   if (items.some(isCardioSet)) {
     const cardio = items.filter(isCardioSet);
-    const durationMin = cardio.reduce((sum, set) => sum + (Number(set.durationMin) || 0), 0);
-    const distanceKm = cardio.reduce((sum, set) => sum + (Number(set.distanceKm) || 0), 0);
-    const speedKmh = durationMin > 0 ? distanceKm / durationMin * 60 : 0;
-    const pace = distanceKm > 0 ? durationMin / distanceKm : null;
-    const score = distanceKm > 0 ? distanceKm * 100 + speedKmh * 6 : durationMin * 4;
+    const durationSec = cardio.reduce((sum, set) => sum + cardioDurationSec(set), 0);
+    const distanceM = cardio.reduce((sum, set) => sum + cardioDistanceM(set), 0);
+    const distanceKm = distanceM / 1000;
+    const speedKmh = durationSec > 0 ? distanceKm / durationSec * 3600 : 0;
+    const pace = distanceKm > 0 ? durationSec / distanceKm : null;
+    const score = distanceKm > 0 ? distanceKm * 100 + speedKmh * 6 : durationSec / 60 * 4;
     return {
       type: "cardio",
       date: items[0]?.createdAt || Date.now(),
       count: cardio.length,
       workCount: cardio.length,
       warmupCount: 0,
-      durationMin,
+      durationSec,
+      durationMin: durationSec / 60,
+      distanceM,
       distanceKm,
       speedKmh,
       pace,
@@ -433,16 +473,18 @@ function daySummary(items) {
   const cardio = items.filter(isCardioSet);
   const exerciseIds = new Set(items.map((set) => set.exerciseId));
   const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
-  const distanceKm = cardio.reduce((sum, set) => sum + (Number(set.distanceKm) || 0), 0);
-  const durationMin = cardio.reduce((sum, set) => sum + (Number(set.durationMin) || 0), 0);
+  const distanceM = cardio.reduce((sum, set) => sum + cardioDistanceM(set), 0);
+  const durationSec = cardio.reduce((sum, set) => sum + cardioDurationSec(set), 0);
   const top = work.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), work[0] || null);
   return {
     exerciseCount: exerciseIds.size,
     setCount: items.length,
     workCount: work.length,
     cardioCount: cardio.length,
-    distanceKm,
-    durationMin,
+    distanceM,
+    distanceKm: distanceM / 1000,
+    durationSec,
+    durationMin: durationSec / 60,
     tonnage,
     top
   };
@@ -554,7 +596,7 @@ function renderHome() {
           <span>${todaySummary.exerciseCount} упр.</span>
           <span>${todaySummary.workCount} рабочих</span>
           <span>${formatWeight(todaySummary.tonnage)} кг×повт</span>
-          ${todaySummary.cardioCount ? `<span>${formatWeight(todaySummary.distanceKm)} км кардио</span>` : ""}
+          ${todaySummary.cardioCount ? `<span>${formatDistanceKm(todaySummary.distanceKm)} кардио</span>` : ""}
         </div>
       </section>
     ` : ""}
@@ -660,7 +702,7 @@ function renderExercise(exerciseId) {
     </section>
     <section class="metrics-row">
       <div><span>Сегодня</span><strong>${todaySets.length}</strong></div>
-      <div><span>${isCardio ? "Всего сегодня" : "Лучший индекс"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + (Number(set.durationMin) || 0), 0)) : last ? formatWeight(Math.max(...sessions.map((s) => s.score))) : "—"}</strong></div>
+      <div><span>${isCardio ? "Всего сегодня" : "Лучший индекс"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + cardioDurationSec(set), 0)) : last ? formatWeight(Math.max(...sessions.map((s) => s.score))) : "—"}</strong></div>
       <div><span>Динамика</span><strong>${last && previous ? trendText(last.score, previous.score) : "—"}</strong></div>
     </section>
     ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, allSets, previous)}
@@ -700,7 +742,12 @@ function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous
 
 function renderCardioEntry(exercise, editingSet) {
   const values = editingSet && isCardioSet(editingSet)
-    ? { durationMin: String(editingSet.durationMin || ""), distanceKm: String(editingSet.distanceKm || ""), setting: String(editingSet.setting || "") }
+    ? {
+        minutes: String(Math.floor(cardioDurationSec(editingSet) / 60) || ""),
+        seconds: String(cardioDurationSec(editingSet) % 60 || ""),
+        distanceM: String(Math.round(cardioDistanceM(editingSet)) || ""),
+        setting: String(editingSet.setting || "")
+      }
     : draftCardio;
   const rowing = isRowingExercise(exercise);
   const elliptical = isEllipticalExercise(exercise);
@@ -708,16 +755,19 @@ function renderCardioEntry(exercise, editingSet) {
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="cardio">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование кардио</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
       <div class="quick-row">
-        ${rowing ? `<button type="button" data-action="cardio-distance" data-distance="3">3000 м тест</button><button type="button" data-action="cardio-setting" data-setting="9">Заслонка 9</button>` : ""}
-        ${elliptical ? `<button type="button" data-action="cardio-duration" data-duration="8">8 мин разогрев</button>` : ""}
-        <button type="button" data-action="cardio-duration" data-duration="10">10 мин</button>
-        <button type="button" data-action="cardio-duration" data-duration="20">20 мин</button>
+        ${rowing ? `<button type="button" data-action="cardio-distance" data-distance="3000">3000 м тест</button><button type="button" data-action="cardio-setting" data-setting="9">Заслонка 9</button>` : ""}
+        ${elliptical ? `<button type="button" data-action="cardio-duration" data-minutes="8" data-seconds="0">8 мин разогрев</button>` : ""}
+        <button type="button" data-action="cardio-duration" data-minutes="10" data-seconds="0">10 мин</button>
+        <button type="button" data-action="cardio-duration" data-minutes="20" data-seconds="0">20 мин</button>
       </div>
       <div class="input-pair cardio-pair">
-        <label class="number-control"><span>Время, мин</span><input inputmode="decimal" name="durationMin" min="0.1" required value="${values.durationMin}" placeholder="20" /></label>
-        <label class="number-control"><span>Дистанция, км</span><input inputmode="decimal" name="distanceKm" min="0.01" required value="${values.distanceKm}" placeholder="${rowing ? "3.0" : "1.5"}" /></label>
+        <label class="number-control"><span>Минуты</span><input inputmode="numeric" name="minutes" min="0" required value="${values.minutes}" placeholder="13" /></label>
+        <label class="number-control"><span>Секунды</span><input inputmode="numeric" name="seconds" min="0" max="59" value="${values.seconds}" placeholder="30" /></label>
       </div>
-      <label class="number-control cardio-setting"><span>Настройка тренажёра</span><input inputmode="decimal" name="setting" value="${values.setting || ""}" placeholder="например 9" /></label>
+      <div class="input-pair cardio-pair">
+        <label class="number-control"><span>Дистанция, м</span><input inputmode="numeric" name="distanceM" min="1" required value="${values.distanceM}" placeholder="${rowing ? "3000" : "1500"}" /></label>
+        <label class="number-control cardio-setting"><span>Настройка тренажёра</span><input inputmode="decimal" name="setting" value="${values.setting || ""}" placeholder="например 9" /></label>
+      </div>
       <div class="cardio-context">
         ${rowing ? `<strong>Гребля</strong><span>3000 м - быстрый пресет для рабочего фит-теста, обычные тренировки можно писать с любой дистанцией.</span><span>${rowNormsText()}</span><span>Заслонка/настройка сохраняется как контекст и не влияет на индекс.</span>` : ""}
         ${elliptical ? `<strong>Эллипс: спокойное кардио</strong><span>Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.</span>` : ""}
@@ -758,10 +808,12 @@ function renderSetComparison(exerciseId, formValues) {
 function renderSetRow(set) {
   if (isCardioSet(set)) {
     const pace = cardioPace(set);
+    const exercise = state.exercises.find((item) => item.id === set.exerciseId);
+    const rowing = isRowingExercise(exercise);
     return `
       <div class="set-row cardio-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}">
-        <strong>${formatDuration(set.durationMin)} · ${formatWeight(Number(set.distanceKm) || 0)} км</strong>
-        <span>${formatWeight(cardioSpeed(set))} км/ч · ${formatPace(pace)}${set.setting ? ` · настройка ${set.setting}` : ""} · ${formatDateTime(set.createdAt)}</span>
+        <strong>${formatDuration(cardioDurationSec(set))} · ${formatDistanceMeters(cardioDistanceM(set))}</strong>
+        <span>${rowing ? `ave/500 м ${formatDuration(rowingSplit500(set))} · ${rowing3000Label(set)}` : `${formatWeight(cardioSpeed(set))} км/ч · ${formatPace(pace)}`}${set.setting ? ` · настройка ${set.setting}` : ""} · ${formatDateTime(set.createdAt)}</span>
         <div class="set-actions">
           <button data-action="edit-set" data-id="${set.id}" aria-label="Редактировать кардио">✎</button>
           <button data-action="delete-set" data-id="${set.id}" aria-label="Удалить запись">×</button>
@@ -807,7 +859,7 @@ function renderMiniProgress(exerciseId) {
     type: "line",
     pointValues: cardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => cardio
-      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.distanceKm)} км`
+      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDistanceKm(s.distanceKm)}`
       : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.avgReserve)} запас`)
   });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
@@ -841,7 +893,7 @@ function renderProgress(selectedId) {
     type: "line",
     pointValues: selectedIsCardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => selectedIsCardio
-      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDuration(s.durationMin)}`
+      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDuration(s.durationSec)}`
       : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.top.weight)}×${s.top.reps}`)
   });
   const volumeChart = `chart-${chartRefs.length}`;
@@ -851,17 +903,20 @@ function renderProgress(selectedId) {
     labels: sessions.map((s) => formatDate(s.date)),
     type: "bar",
     details: sessions.map((s) => selectedIsCardio
-      ? `${formatDate(s.date)} · ${formatWeight(s.distanceKm)} км · ${formatDuration(s.durationMin)}`
+      ? `${formatDate(s.date)} · ${formatDistanceKm(s.distanceKm)} · ${formatDuration(s.durationSec)}`
       : `${formatDate(s.date)} · ${formatWeight(s.tonnage)} кг×повт · ${s.workCount} рабочих`)
   });
   const reserveChart = `chart-${chartRefs.length}`;
   chartRefs.push({
     id: reserveChart,
-    values: sessions.map((s) => selectedIsCardio ? s.speedKmh : s.avgReserve),
+    values: sessions.map((s) => selectedIsCardio ? selectedIsRowing ? rowingSplit500(s) : s.speedKmh : s.avgReserve),
     labels: sessions.map((s) => formatDate(s.date)),
     type: "line",
+    invert: selectedIsRowing,
     details: sessions.map((s) => selectedIsCardio
-      ? `${formatDate(s.date)} · ${formatWeight(s.speedKmh)} км/ч · темп ${formatPace(s.pace)}`
+      ? selectedIsRowing
+        ? `${formatDate(s.date)} · ave/500 м ${formatDuration(rowingSplit500(s))} · ${rowing3000Label(s)}`
+        : `${formatDate(s.date)} · ${formatWeight(s.speedKmh)} км/ч · темп ${formatPace(s.pace)}`
       : `${formatDate(s.date)} · запас ${formatWeight(s.avgReserve)} · ${s.workCount} рабочих`)
   });
   const fatigueValues = sessions.map((s) => s.fatigue).filter((v) => v != null);
@@ -918,16 +973,16 @@ function renderProgress(selectedId) {
       </div>
     </section>
     <section class="progress-mosaic">
-      <div class="metric-tile strength"><span>${selectedIsCardio ? "Дистанция" : "Сила"}</span><strong>${last ? selectedIsCardio ? `${formatWeight(last.distanceKm)} км` : `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>${selectedIsCardio ? "за последнюю сессию" : "оценочный 1ПМ"}</p></div>
-      <div class="metric-tile volume"><span>${selectedIsCardio ? "Время" : "Объём"}</span><strong>${last ? selectedIsCardio ? formatDuration(last.durationMin) : formatWeight(last.tonnage) : "—"}</strong><p>${selectedIsCardio ? "минуты работы" : "рабочие кг×повт"}</p></div>
-      <div class="metric-tile reserve"><span>${selectedIsCardio ? "Скорость" : "Запас"}</span><strong>${last ? selectedIsCardio ? `${formatWeight(last.speedKmh)} км/ч` : formatWeight(last.avgReserve) : "—"}</strong><p>${selectedIsCardio ? "средняя" : "средний RIR 0-10"}</p></div>
-      <div class="metric-tile stability"><span>${selectedIsCardio ? selectedIsRowing ? "3000 м" : "Темп" : "Серия"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatClockMinutes(row3000Equivalent(last)) : formatPace(last.pace) : last.fatigue != null ? formatWeight(last.fatigue) : "—" : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "эквивалент по темпу" : "мин/км" : "падение меньше = лучше"}</p></div>
+      <div class="metric-tile strength"><span>${selectedIsCardio ? "Дистанция" : "Сила"}</span><strong>${last ? selectedIsCardio ? formatDistanceKm(last.distanceKm) : `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>${selectedIsCardio ? "за последнюю сессию" : "оценочный 1ПМ"}</p></div>
+      <div class="metric-tile volume"><span>${selectedIsCardio ? "Время" : "Объём"}</span><strong>${last ? selectedIsCardio ? formatDuration(last.durationSec) : formatWeight(last.tonnage) : "—"}</strong><p>${selectedIsCardio ? "мин:сек работы" : "рабочие кг×повт"}</p></div>
+      <div class="metric-tile reserve"><span>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(rowingSplit500(last)) : `${formatWeight(last.speedKmh)} км/ч` : formatWeight(last.avgReserve) : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "средний split" : "средняя" : "средний RIR 0-10"}</p></div>
+      <div class="metric-tile stability"><span>${selectedIsCardio ? selectedIsRowing ? "3000 м" : "Темп" : "Серия"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(row3000Equivalent(last)) : formatPace(last.pace) : last.fatigue != null ? formatWeight(last.fatigue) : "—" : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "эквивалент по темпу" : "мин/км" : "падение меньше = лучше"}</p></div>
     </section>
     ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous, selected)}</section>` : ""}
     <section class="chart-grid">
       <div class="chart-panel primary-chart"><div class="section-head"><h2>${selectedIsCardio ? "Кардио индекс" : "Форма"}</h2><span class="legend-dot">${selectedIsCardio ? "дистанция + скорость" : "точки окрашены запасом"}</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">${selectedIsCardio ? "Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории." : "Главная линия: сила с поправкой на запас. Разминка не раздувает показатель."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Дистанция" : "Объём"}</h2><span class="legend-dot">${selectedIsCardio ? "км" : "рабочие подходы"}</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Сколько километров набрано за сессию." : "Сколько работы сделано за день."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
-      <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? selectedIsRowing ? "ниже лучше" : "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? selectedIsRowing ? "Средний split на 500 м. Для гребли это обычно понятнее скорости." : "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       ${selectedIsCardio ? "" : `<div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>`}
     </section>
     <section class="panel">
@@ -944,23 +999,24 @@ function renderProgress(selectedId) {
 function renderProgressNote(last, previous, exercise) {
   if (last.type === "cardio") {
     const rowEquivalent = isRowingExercise(exercise) ? row3000Equivalent(last) : null;
+    const split500 = isRowingExercise(exercise) ? rowingSplit500(last) : null;
     if (!previous) {
       return `
         <h2>Вывод</h2>
-        <p class="muted">${rowEquivalent ? `Первая точка по гребле: эквивалент 3000 м ${formatClockMinutes(rowEquivalent)}. ${rowNormsText()}` : "Есть первая кардио-точка. Следующая тренировка даст сравнение скорости, дистанции и времени."}</p>
+        <p class="muted">${rowEquivalent ? `Первая точка по гребле: ave/500 м ${formatDuration(split500)}, ${rowing3000Label(last)}. ${rowNormsText()}` : "Есть первая кардио-точка. Следующая тренировка даст сравнение скорости, дистанции и времени."}</p>
       `;
     }
     const speedDelta = last.speedKmh - previous.speedKmh;
     const distanceDelta = last.distanceKm - previous.distanceKm;
-    const durationDelta = last.durationMin - previous.durationMin;
+    const durationDelta = last.durationSec - previous.durationSec;
     return `
       <h2>Вывод</h2>
       <p>${speedDelta >= 0 ? "средняя скорость выше" : "средняя скорость ниже"}, ${distanceDelta >= 0 ? "дистанция выше" : "дистанция ниже"}, ${durationDelta >= 0 ? "времени больше" : "времени меньше"}.</p>
-      ${rowEquivalent ? `<p class="muted">Эквивалент 3000 м: ${formatClockMinutes(rowEquivalent)}. ${rowNormsText()}</p>` : ""}
+      ${rowEquivalent ? `<p class="muted">Гребля: ave/500 м ${formatDuration(split500)}, ${rowing3000Label(last)}. ${rowNormsText()}</p>` : ""}
       <div class="mini-metrics">
         <span>${trendText(last.speedKmh, previous.speedKmh, " км/ч")}</span>
         <span>${trendText(last.distanceKm, previous.distanceKm, " км")}</span>
-        <span>${trendText(last.durationMin, previous.durationMin, " мин")}</span>
+        <span>${trendText(last.durationSec, previous.durationSec, " сек")}</span>
       </div>
     `;
   }
@@ -989,15 +1045,17 @@ function renderProgressNote(last, previous, exercise) {
 function renderSessionSummary(session) {
   const pr = session.score === Math.max(...progressForExercise(session.top.exerciseId).map((item) => item.score));
   if (session.type === "cardio") {
+    const exercise = state.exercises.find((item) => item.id === session.top.exerciseId);
+    const rowing = isRowingExercise(exercise);
     return `
       <article class="session-summary">
         <div>
           <strong>${formatDate(session.date)}${pr ? " · лучший" : ""}</strong>
-          <span>${session.count} зап. · ${formatDuration(session.durationMin)}</span>
+          <span>${session.count} зап. · ${formatDuration(session.durationSec)}</span>
         </div>
         <div>
-          <strong>${formatWeight(session.distanceKm)} км · ${formatWeight(session.speedKmh)} км/ч</strong>
-          <span>${formatWeight(session.score)} индекс · темп ${formatPace(session.pace)}</span>
+          <strong>${formatDistanceKm(session.distanceKm)} · ${rowing ? `ave/500 м ${formatDuration(rowingSplit500(session))}` : `${formatWeight(session.speedKmh)} км/ч`}</strong>
+          <span>${rowing ? rowing3000Label(session) : `${formatWeight(session.score)} индекс · темп ${formatPace(session.pace)}`}</span>
         </div>
       </article>
     `;
@@ -1076,7 +1134,7 @@ function renderHistoryDay(key, items) {
   return `
     <section class="panel history-day">
       <button class="day-toggle" data-action="history-day" data-day="${key}">
-        <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт${summary.cardioCount ? ` · ${formatWeight(summary.distanceKm)} км` : ""}</small></span>
+        <span><strong>${title}</strong><small>${summary.exerciseCount} упр. · ${summary.workCount} рабочих · ${formatWeight(summary.tonnage)} кг×повт${summary.cardioCount ? ` · ${formatDistanceKm(summary.distanceKm)}` : ""}</small></span>
         <span>${expanded ? "Свернуть" : "Открыть"}</span>
       </button>
       ${expanded ? exerciseGroupsForDay(items).map(({ exerciseId, exercise, sets, metrics }) => {
@@ -1087,7 +1145,7 @@ function renderHistoryDay(key, items) {
           <article class="history-exercise">
             <button class="exercise-toggle" data-action="history-exercise" data-key="${exerciseKey}">
               <span>${exercise?.name || "Удалённое упражнение"}</span>
-              <small>${cardio ? `${metrics.count} зап. · ${formatDuration(metrics.durationMin)} · ${formatWeight(metrics.distanceKm)} км` : `${metrics.workCount} раб. · ${formatWeight(metrics.tonnage)} объём · ${metrics.top ? `${formatWeight(metrics.top.weight)} × ${metrics.top.reps}` : "нет рабочих"}`}</small>
+              <small>${cardio ? `${metrics.count} зап. · ${formatDuration(metrics.durationSec)} · ${formatDistanceKm(metrics.distanceKm)}` : `${metrics.workCount} раб. · ${formatWeight(metrics.tonnage)} объём · ${metrics.top ? `${formatWeight(metrics.top.weight)} × ${metrics.top.reps}` : "нет рабочих"}`}</small>
             </button>
             ${exerciseExpanded ? `<div class="sets-list">${sets.map(renderSetRow).join("")}</div>` : ""}
           </article>
@@ -1219,14 +1277,18 @@ function bindEvents(root) {
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='cardio']");
     if (!form) return;
-    form.elements.durationMin.value = button.dataset.duration;
-    if (!editingSetId) draftCardio.durationMin = button.dataset.duration;
+    form.elements.minutes.value = button.dataset.minutes || "0";
+    form.elements.seconds.value = button.dataset.seconds || "0";
+    if (!editingSetId) {
+      draftCardio.minutes = form.elements.minutes.value;
+      draftCardio.seconds = form.elements.seconds.value;
+    }
   }));
   root.querySelectorAll("[data-action='cardio-distance']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='cardio']");
     if (!form) return;
-    form.elements.distanceKm.value = button.dataset.distance;
-    if (!editingSetId) draftCardio.distanceKm = button.dataset.distance;
+    form.elements.distanceM.value = button.dataset.distance;
+    if (!editingSetId) draftCardio.distanceM = button.dataset.distance;
   }));
   root.querySelectorAll("[data-action='cardio-setting']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='cardio']");
@@ -1234,7 +1296,7 @@ function bindEvents(root) {
     form.elements.setting.value = button.dataset.setting;
     if (!editingSetId) draftCardio.setting = button.dataset.setting;
   }));
-  root.querySelectorAll("[name='durationMin'], [name='distanceKm'], [name='setting']").forEach((input) => input.addEventListener("input", () => {
+  root.querySelectorAll("[name='minutes'], [name='seconds'], [name='distanceM'], [name='setting']").forEach((input) => input.addEventListener("input", () => {
     const form = input.closest("[data-form='set'][data-kind='cardio']");
     if (!form || editingSetId) return;
     draftCardio[input.name] = input.value;
@@ -1333,15 +1395,28 @@ function saveSet(event) {
   const data = new FormData(form);
   const existing = state.sets.find((set) => set.id === editingSetId);
   if (form.dataset.kind === "cardio") {
-    const durationMin = Number(String(data.get("durationMin")).replace(",", "."));
-    const distanceKm = Number(String(data.get("distanceKm")).replace(",", "."));
+    const minutes = Number(data.get("minutes"));
+    const seconds = Number(data.get("seconds") || 0);
+    const distanceM = Number(data.get("distanceM"));
+    const durationSec = minutes * 60 + seconds;
     const setting = String(data.get("setting") || "").trim();
-    if (!Number.isFinite(durationMin) || durationMin <= 0 || !Number.isFinite(distanceKm) || distanceKm <= 0) return;
+    if (
+      !Number.isInteger(minutes) ||
+      !Number.isInteger(seconds) ||
+      minutes < 0 ||
+      seconds < 0 ||
+      seconds > 59 ||
+      durationSec <= 0 ||
+      !Number.isFinite(distanceM) ||
+      distanceM <= 0
+    ) return;
     if (existing) {
       existing.type = "cardio";
-      existing.durationMin = durationMin;
-      existing.distanceKm = distanceKm;
+      existing.durationSec = durationSec;
+      existing.distanceM = Math.round(distanceM);
       existing.setting = setting;
+      delete existing.durationMin;
+      delete existing.distanceKm;
       delete existing.weight;
       delete existing.reps;
       delete existing.reserve;
@@ -1356,13 +1431,13 @@ function saveSet(event) {
         id,
         type: "cardio",
         exerciseId: form.dataset.id,
-        durationMin,
-        distanceKm,
+        durationSec,
+        distanceM: Math.round(distanceM),
         setting,
         createdAt: Date.now()
       });
       lastTouchedSetId = id;
-      draftCardio = { durationMin: String(durationMin), distanceKm: String(distanceKm), setting };
+      draftCardio = { minutes: String(minutes), seconds: String(seconds), distanceM: String(Math.round(distanceM)), setting };
     }
     saveState();
     render();
@@ -1377,6 +1452,8 @@ function saveSet(event) {
     existing.weight = weight;
     existing.reps = reps;
     existing.reserve = reserve;
+    delete existing.durationSec;
+    delete existing.distanceM;
     delete existing.durationMin;
     delete existing.distanceKm;
     delete existing.setting;
