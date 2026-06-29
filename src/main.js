@@ -1602,23 +1602,29 @@ function drawCharts() {
     if (!canvas || !values.length) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.max(320, rect.width) * dpr;
-    canvas.height = Number(canvas.getAttribute("height")) * dpr;
+    const width = Math.max(320, rect.width || canvas.clientWidth || 0);
+    const height = Number(canvas.getAttribute("height"));
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
-    drawChart(ctx, rect.width, Number(canvas.getAttribute("height")), values, labels, type, invert, pointValues);
+    drawChart(ctx, width, height, values, labels, type, invert, pointValues);
     bindChartTooltip(canvas, chart);
   });
 }
 
 function chartGeometry(width, height, values, type) {
-  const pad = { l: 48, r: 18, t: 18, b: 30 };
-  const chartW = width - pad.l - pad.r;
-  const chartH = height - pad.t - pad.b;
+  const pad = { l: 54, r: 38, t: 26, b: 36 };
+  const chartW = Math.max(80, width - pad.l - pad.r);
+  const chartH = Math.max(80, height - pad.t - pad.b);
   const max = Math.max(...values, 1);
   const min = type === "bar" ? 0 : Math.min(...values);
   const range = max - min || 1;
   return { pad, chartW, chartH, max, min, range };
+}
+
+function clampChartPoint(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null) {
@@ -1654,8 +1660,8 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     gradient.addColorStop(1, `${color}00`);
     const area = new Path2D();
     values.forEach((value, index) => {
-      const x = pad.l + (chartW * index) / Math.max(1, values.length - 1);
-      const y = pad.t + chartH - ((value - min) / range) * chartH;
+      const x = clampChartPoint(pad.l + (chartW * index) / Math.max(1, values.length - 1), pad.l + 7, pad.l + chartW - 7);
+      const y = clampChartPoint(pad.t + chartH - ((value - min) / range) * chartH, pad.t + 8, pad.t + chartH - 8);
       if (index === 0) area.moveTo(x, pad.t + chartH);
       area.lineTo(x, y);
       if (index === values.length - 1) area.lineTo(x, pad.t + chartH);
@@ -1670,15 +1676,15 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     ctx.lineCap = "round";
     ctx.beginPath();
     values.forEach((value, index) => {
-      const x = pad.l + (chartW * index) / Math.max(1, values.length - 1);
-      const y = pad.t + chartH - ((value - min) / range) * chartH;
+      const x = clampChartPoint(pad.l + (chartW * index) / Math.max(1, values.length - 1), pad.l + 7, pad.l + chartW - 7);
+      const y = clampChartPoint(pad.t + chartH - ((value - min) / range) * chartH, pad.t + 8, pad.t + chartH - 8);
       if (index === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
     values.forEach((value, index) => {
-      const x = pad.l + (chartW * index) / Math.max(1, values.length - 1);
-      const y = pad.t + chartH - ((value - min) / range) * chartH;
+      const x = clampChartPoint(pad.l + (chartW * index) / Math.max(1, values.length - 1), pad.l + 7, pad.l + chartW - 7);
+      const y = clampChartPoint(pad.t + chartH - ((value - min) / range) * chartH, pad.t + 8, pad.t + chartH - 8);
       ctx.fillStyle = pointValues ? reserveColor(pointValues[index]) : index === values.length - 1 ? "#f4f7f2" : color;
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 2.5;
@@ -1692,8 +1698,10 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
   labels.forEach((label, index) => {
     if (index !== 0 && index !== labels.length - 1 && index % Math.ceil(labels.length / 4) !== 0) return;
     const x = pad.l + (chartW * index) / Math.max(1, labels.length - 1);
-    ctx.fillText(label, x - 14, height - 8);
+    ctx.textAlign = index === 0 ? "left" : index === labels.length - 1 ? "right" : "center";
+    ctx.fillText(label, clampChartPoint(x, pad.l, pad.l + chartW), height - 10);
   });
+  ctx.textAlign = "left";
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
