@@ -389,7 +389,7 @@ function sessionMetrics(items) {
   const workScores = work.map(adjustedScore).sort((a, b) => b - a);
   const stableScores = workScores.slice(0, Math.min(3, workScores.length));
   const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
-  const pureE1rm = top ? e1rm(top) : 0;
+  const pureE1rm = work.length ? Math.max(...work.map(e1rm)) : 0;
   const score = stableScores.length ? stableScores.reduce((sum, value) => sum + value, 0) / stableScores.length : 0;
   const avgReserve = source.reduce((sum, set) => sum + reserveValue(set), 0) / Math.max(1, source.length);
   const fatigue = work.length >= 2 ? Math.max(0, adjustedScore(work[0]) - adjustedScore(work[work.length - 1])) : null;
@@ -977,7 +977,7 @@ function renderProgress(selectedId) {
     pointValues: selectedIsCardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => selectedIsCardio
       ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDuration(s.durationSec)}`
-      : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.top.weight)}×${s.top.reps}`)
+      : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс серии · пик ${formatWeight(s.pureE1rm)} кг 1ПМ · ${s.workCount} рабочих`)
   });
   const volumeChart = `chart-${chartRefs.length}`;
   chartRefs.push({
@@ -1056,7 +1056,7 @@ function renderProgress(selectedId) {
       </div>
     </section>
     <section class="progress-mosaic">
-      <div class="metric-tile strength"><span>${selectedIsCardio ? "Дистанция" : "Сила"}</span><strong>${last ? selectedIsCardio ? formatDistanceKm(last.distanceKm) : `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>${selectedIsCardio ? "за последнюю сессию" : "оценочный 1ПМ"}</p></div>
+      <div class="metric-tile strength"><span>${selectedIsCardio ? "Дистанция" : "Пик силы"}</span><strong>${last ? selectedIsCardio ? formatDistanceKm(last.distanceKm) : `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>${selectedIsCardio ? "за последнюю сессию" : "лучший чистый 1ПМ"}</p></div>
       <div class="metric-tile volume"><span>${selectedIsCardio ? "Время" : "Объём"}</span><strong>${last ? selectedIsCardio ? formatDuration(last.durationSec) : formatWeight(last.tonnage) : "—"}</strong><p>${selectedIsCardio ? "мин:сек работы" : "рабочие кг×повт"}</p></div>
       <div class="metric-tile reserve"><span>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(rowingSplit500(last)) : `${formatWeight(last.speedKmh)} км/ч` : formatWeight(last.avgReserve) : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "средний split" : "средняя" : "средний RIR 0-10"}</p></div>
       <div class="metric-tile stability"><span>${selectedIsCardio ? selectedIsRowing ? "3000 м" : "Темп" : "Серия"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(row3000Equivalent(last)) : formatPace(last.pace) : last.fatigue != null ? formatWeight(last.fatigue) : "—" : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "эквивалент по темпу" : "мин/км" : "падение меньше = лучше"}</p></div>
