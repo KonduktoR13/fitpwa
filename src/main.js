@@ -386,9 +386,11 @@ function sessionMetrics(items) {
   const top = work.length
     ? work.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), work[0])
     : null;
+  const workScores = work.map(adjustedScore).sort((a, b) => b - a);
+  const stableScores = workScores.slice(0, Math.min(3, workScores.length));
   const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
   const pureE1rm = top ? e1rm(top) : 0;
-  const score = top ? adjustedScore(top) : 0;
+  const score = stableScores.length ? stableScores.reduce((sum, value) => sum + value, 0) / stableScores.length : 0;
   const avgReserve = source.reduce((sum, set) => sum + reserveValue(set), 0) / Math.max(1, source.length);
   const fatigue = work.length >= 2 ? Math.max(0, adjustedScore(work[0]) - adjustedScore(work[work.length - 1])) : null;
   const start = items.at(0)?.createdAt || Date.now();
@@ -1061,7 +1063,7 @@ function renderProgress(selectedId) {
     </section>
     ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous, selected)}</section>` : ""}
     <section class="chart-grid">
-      <div class="chart-panel primary-chart"><div class="section-head"><h2>${selectedIsCardio ? "Кардио индекс" : "Форма"}</h2><span class="legend-dot">${selectedIsCardio ? "дистанция + скорость" : "точки окрашены запасом"}</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">${selectedIsCardio ? "Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории." : "Главная линия: сила с поправкой на запас. Разминка не раздувает показатель."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel primary-chart"><div class="section-head"><h2>${selectedIsCardio ? "Кардио индекс" : "Форма"}</h2><span class="legend-dot">${selectedIsCardio ? "дистанция + скорость" : "лучшие рабочие"}</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">${selectedIsCardio ? "Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории." : "Главная линия: среднее из лучших рабочих подходов с поправкой на запас. Разминка не раздувает показатель."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Дистанция" : "Объём"}</h2><span class="legend-dot">${selectedIsCardio ? "км" : "рабочие подходы"}</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Сколько километров набрано за сессию." : "Сколько работы сделано за день."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? selectedIsRowing ? "ниже лучше" : "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? selectedIsRowing ? "Средний split на 500 м. Для гребли это обычно понятнее скорости." : "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       ${selectedIsCardio ? "" : `<div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>`}
