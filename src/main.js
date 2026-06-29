@@ -56,6 +56,8 @@ let historyCursor = new Date();
 let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
 let chartTooltip = null;
+let toast = null;
+let toastTimer = null;
 
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -571,6 +573,19 @@ function iconHtml(exercise) {
   return `<span>${exercise.icon || "🏋️"}</span>`;
 }
 
+function haptic(pattern = 18) {
+  if ("vibrate" in navigator) navigator.vibrate(pattern);
+}
+
+function notify(text, tone = "") {
+  toast = { text, tone };
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toast = null;
+    render();
+  }, 1800);
+}
+
 function render() {
   chartRefs = [];
   const app = document.querySelector("#app");
@@ -585,6 +600,7 @@ function render() {
       </header>
       <main>${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
+      ${toast ? `<div class="toast ${toast.tone || ""}">${toast.text}</div>` : ""}
       <nav class="bottom-nav">
         <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упр.</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
@@ -1500,12 +1516,15 @@ async function saveExercise(event) {
   }
   exerciseFormOpen = false;
   saveState();
+  haptic(12);
+  notify(existing ? "Упражнение обновлено" : "Упражнение добавлено");
   render();
 }
 
 function saveSet(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  form.querySelector(".save-set")?.classList.add("is-saving");
   const data = new FormData(form);
   const existing = state.sets.find((set) => set.id === editingSetId);
   if (form.dataset.kind === "cardio") {
@@ -1539,6 +1558,7 @@ function saveSet(event) {
       existing.updatedAt = Date.now();
       lastTouchedSetId = existing.id;
       finishSetEditing();
+      notify("Кардио изменено", "success");
     } else {
       const id = uid();
       state.sets.push({
@@ -1552,7 +1572,9 @@ function saveSet(event) {
       });
       lastTouchedSetId = id;
       draftCardio = { minutes: String(minutes), seconds: String(seconds), distanceM: String(Math.round(distanceM)), setting };
+      notify("Кардио записано", "success");
     }
+    haptic([12, 30, 12]);
     saveState();
     render();
     return;
@@ -1577,6 +1599,7 @@ function saveSet(event) {
     existing.updatedAt = Date.now();
     lastTouchedSetId = existing.id;
     finishSetEditing();
+    notify("Подход изменён", "success");
   } else {
     const id = uid();
     state.sets.push({
@@ -1591,7 +1614,9 @@ function saveSet(event) {
     });
     lastTouchedSetId = id;
     draftSet = suggestedDraftSet(form.dataset.id, { weight: String(weight), reps: String(reps), reserve, warmup });
+    notify(warmup ? "Разминка записана" : "Подход записан", "success");
   }
+  haptic([12, 30, 12]);
   saveState();
   render();
 }
@@ -1600,6 +1625,8 @@ function deleteSet(id) {
   state.sets = state.sets.filter((set) => set.id !== id);
   if (editingSetId === id) finishSetEditing();
   saveState();
+  haptic(20);
+  notify("Запись удалена");
   render();
 }
 
