@@ -526,7 +526,7 @@ function previousStrengthSets(exerciseId, warmup) {
 
 function previousStrengthTarget(exerciseId, warmup, index = todayStrengthIndex(exerciseId, warmup)) {
   const previous = previousStrengthSets(exerciseId, warmup);
-  return previous[index] || previous.at(-1) || null;
+  return previous[index] || null;
 }
 
 function suggestedDraftSet(exerciseId, fallback = {}) {
@@ -812,23 +812,25 @@ function renderSetComparison(exerciseId, formValues) {
   const warmup = Boolean(formValues.warmup);
   const index = todayStrengthIndex(exerciseId, warmup);
   const previous = previousStrengthSets(exerciseId, warmup);
-  const target = previous[index] || previous.at(-1) || null;
+  const target = previous[index] || null;
   if (formValues.warmup) {
     if (!target) {
-      return `<div class="comparison muted">Прошлых разминочных подходов пока нет. Разминка не влияет на прогресс.</div>`;
+      return previous.length
+        ? `<div class="comparison muted">В прошлой тренировке было только ${previous.length} разм. подх. Разминка №${index + 1} новая и не влияет на прогресс.</div>`
+        : `<div class="comparison muted">Прошлых разминочных подходов пока нет. Разминка не влияет на прогресс.</div>`;
     }
-    const targetNumber = Math.min(index + 1, previous.length);
     return `
       <div class="comparison muted">
-        <span>Прошлая разминка №${targetNumber}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
+        <span>Прошлая разминка №${index + 1}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
         <strong>Не влияет на прогресс</strong>
       </div>
     `;
   }
   if (!target) {
-    return `<div class="comparison muted">Прошлых рабочих подходов пока нет.</div>`;
+    return previous.length
+      ? `<div class="comparison muted">В прошлой тренировке было только ${previous.length} раб. подх. Рабочий №${index + 1} новый, сравнение не строю.</div>`
+      : `<div class="comparison muted">Прошлых рабочих подходов пока нет.</div>`;
   }
-  const targetNumber = Math.min(index + 1, previous.length);
   const weight = Number(String(formValues.weight || 0).replace(",", "."));
   const reps = Number(formValues.reps || 0);
   const canCompare = Number.isFinite(weight) && weight > 0 && Number.isFinite(reps) && reps > 0;
@@ -838,7 +840,7 @@ function renderSetComparison(exerciseId, formValues) {
   const direction = delta == null ? "" : delta >= 0 ? "good" : "bad";
   return `
     <div class="comparison ${direction}">
-      <span>Прошлый рабочий №${targetNumber}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
+      <span>Прошлый рабочий №${index + 1}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
       <strong>${delta == null ? "Введите вес и повторы" : trendText(current, previousScore)}</strong>
     </div>
   `;
