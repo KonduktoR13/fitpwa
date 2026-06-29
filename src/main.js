@@ -47,6 +47,7 @@ let chartRefs = [];
 let activeSetField = "weight";
 let nativeKeyboard = false;
 let editingSetId = null;
+let editingReturnRoute = null;
 let editingExerciseId = null;
 let lastTouchedSetId = null;
 let waitingServiceWorker = null;
@@ -165,6 +166,10 @@ function saveState() {
 
 function setRoute(next) {
   route = next;
+  if (next.name !== "exercise") {
+    editingSetId = null;
+    editingReturnRoute = null;
+  }
   window.scrollTo({ top: 0, behavior: "instant" });
   render();
 }
@@ -864,6 +869,18 @@ function updateStrengthComparison(root) {
   comparison.outerHTML = renderSetComparison(form.dataset.id, strengthFormValues(form));
 }
 
+function finishSetEditing() {
+  const returnRoute = editingReturnRoute;
+  editingSetId = null;
+  editingReturnRoute = null;
+  if (returnRoute?.name === "history") {
+    activeHistoryDay = returnRoute.activeHistoryDay || activeHistoryDay;
+    historyCursor = returnRoute.historyCursor ? new Date(returnRoute.historyCursor) : historyCursor;
+    route = { name: "history" };
+    return;
+  }
+}
+
 function applySuggestedStrengthValues(root) {
   const form = root.querySelector("[data-form='set'][data-kind='strength']");
   if (!form) return;
@@ -1415,7 +1432,7 @@ function bindEvents(root) {
     startEditSet(button.dataset.id);
   }));
   root.querySelector("[data-action='cancel-edit']")?.addEventListener("click", () => {
-    editingSetId = null;
+    finishSetEditing();
     render();
   });
   root.querySelectorAll("[data-action='progress-exercise']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress", id: button.dataset.id })));
@@ -1521,7 +1538,7 @@ function saveSet(event) {
       delete existing.warmup;
       existing.updatedAt = Date.now();
       lastTouchedSetId = existing.id;
-      editingSetId = null;
+      finishSetEditing();
     } else {
       const id = uid();
       state.sets.push({
@@ -1559,7 +1576,7 @@ function saveSet(event) {
     existing.warmup = warmup;
     existing.updatedAt = Date.now();
     lastTouchedSetId = existing.id;
-    editingSetId = null;
+    finishSetEditing();
   } else {
     const id = uid();
     state.sets.push({
@@ -1581,7 +1598,7 @@ function saveSet(event) {
 
 function deleteSet(id) {
   state.sets = state.sets.filter((set) => set.id !== id);
-  if (editingSetId === id) editingSetId = null;
+  if (editingSetId === id) finishSetEditing();
   saveState();
   render();
 }
@@ -1589,6 +1606,13 @@ function deleteSet(id) {
 function startEditSet(id) {
   const set = state.sets.find((item) => item.id === id);
   if (!set) return;
+  editingReturnRoute = route.name === "history"
+    ? {
+        name: "history",
+        activeHistoryDay,
+        historyCursor: historyCursor.toISOString()
+      }
+    : null;
   editingSetId = id;
   activeSetField = "weight";
   lastTouchedSetId = id;
