@@ -514,28 +514,29 @@ function previousWorkoutSets(exerciseId, beforeTs = Date.now()) {
     .at(-1) || [];
 }
 
-function todayWorkIndex(exerciseId) {
-  return state.sets.filter((set) => set.exerciseId === exerciseId && !isCardioSet(set) && !set.warmup && dayKey(set.createdAt) === dayKey(Date.now())).length;
+function todayStrengthIndex(exerciseId, warmup) {
+  return state.sets.filter((set) => set.exerciseId === exerciseId && !isCardioSet(set) && Boolean(set.warmup) === warmup && dayKey(set.createdAt) === dayKey(Date.now())).length;
 }
 
-function previousWorkSets(exerciseId) {
+function previousStrengthSets(exerciseId, warmup) {
   return previousWorkoutSets(exerciseId)
-    .filter((set) => !isCardioSet(set) && !set.warmup)
+    .filter((set) => !isCardioSet(set) && Boolean(set.warmup) === warmup)
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function previousWorkTarget(exerciseId, index = todayWorkIndex(exerciseId)) {
-  const previousWork = previousWorkSets(exerciseId);
-  return previousWork[index] || previousWork.at(-1) || null;
+function previousStrengthTarget(exerciseId, warmup, index = todayStrengthIndex(exerciseId, warmup)) {
+  const previous = previousStrengthSets(exerciseId, warmup);
+  return previous[index] || previous.at(-1) || null;
 }
 
 function suggestedDraftSet(exerciseId, fallback = {}) {
-  const target = previousWorkTarget(exerciseId);
+  const warmup = fallback.warmup ?? true;
+  const target = previousStrengthTarget(exerciseId, warmup);
   return {
     weight: target ? String(target.weight) : fallback.weight || "",
     reps: target ? String(target.reps) : fallback.reps || "8",
-    reserve: fallback.reserve ?? 2,
-    warmup: fallback.warmup ?? false
+    reserve: target ? reserveValue(target) : fallback.reserve ?? (warmup ? 6 : 2),
+    warmup
   };
 }
 
@@ -808,16 +809,26 @@ function renderCardioEntry(exercise, editingSet) {
 }
 
 function renderSetComparison(exerciseId, formValues) {
+  const warmup = Boolean(formValues.warmup);
+  const index = todayStrengthIndex(exerciseId, warmup);
+  const previous = previousStrengthSets(exerciseId, warmup);
+  const target = previous[index] || previous.at(-1) || null;
   if (formValues.warmup) {
-    return `<div class="comparison muted">Разминка не сравнивается с рабочими подходами.</div>`;
+    if (!target) {
+      return `<div class="comparison muted">Прошлых разминочных подходов пока нет. Разминка не влияет на прогресс.</div>`;
+    }
+    const targetNumber = Math.min(index + 1, previous.length);
+    return `
+      <div class="comparison muted">
+        <span>Прошлая разминка №${targetNumber}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
+        <strong>Не влияет на прогресс</strong>
+      </div>
+    `;
   }
-  const workIndex = todayWorkIndex(exerciseId);
-  const previousWork = previousWorkSets(exerciseId);
-  const target = previousWork[workIndex] || previousWork.at(-1) || null;
   if (!target) {
     return `<div class="comparison muted">Прошлых рабочих подходов пока нет.</div>`;
   }
-  const targetNumber = Math.min(workIndex + 1, previousWork.length);
+  const targetNumber = Math.min(index + 1, previous.length);
   const weight = Number(String(formValues.weight || 0).replace(",", "."));
   const reps = Number(formValues.reps || 0);
   const canCompare = Number.isFinite(weight) && weight > 0 && Number.isFinite(reps) && reps > 0;
@@ -849,17 +860,27 @@ function updateStrengthComparison(root) {
   comparison.outerHTML = renderSetComparison(form.dataset.id, strengthFormValues(form));
 }
 
-function applySuggestedWorkValues(root) {
+function applySuggestedStrengthValues(root) {
   const form = root.querySelector("[data-form='set'][data-kind='strength']");
-  if (!form || form.elements.warmup?.checked) return;
-  const target = previousWorkTarget(form.dataset.id);
-  if (!target) return;
-  form.elements.weight.value = String(target.weight);
-  form.elements.reps.value = String(target.reps);
+  if (!form) return;
+  const warmup = Boolean(form.elements.warmup?.checked);
+  const currentReserve = Number(form.elements.reserve?.value || 0);
+  const reserve = warmup
+    ? Math.max(6, currentReserve || 6)
+    : currentReserve >= 6 ? 2 : currentReserve || 2;
+  const suggestion = suggestedDraftSet(form.dataset.id, {
+    weight: form.elements.weight?.value || "",
+    reps: form.elements.reps?.value || "8",
+    reserve,
+    warmup
+  });
+  form.elements.weight.value = suggestion.weight;
+  form.elements.reps.value = suggestion.reps;
+  form.elements.reserve.value = suggestion.reserve;
   if (!editingSetId) {
-    draftSet.weight = String(target.weight);
-    draftSet.reps = String(target.reps);
+    draftSet = { ...draftSet, ...suggestion };
   }
+  root.querySelector("#reserveText").textContent = reserveName(suggestion.reserve);
   updateStrengthComparison(root);
 }
 
@@ -1278,7 +1299,7 @@ function bindEvents(root) {
   root.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
     const exercise = state.exercises.find((item) => item.id === card.dataset.openExercise);
     draftSet = exercise && !isCardioExercise(exercise)
-      ? suggestedDraftSet(exercise.id)
+      ? suggestedDraftSet(exercise.id, { warmup: true })
       : { weight: "", reps: "8", reserve: 2, warmup: false };
     setRoute({ name: "exercise", id: card.dataset.openExercise });
   }));
@@ -1298,7 +1319,7 @@ function bindEvents(root) {
   });
   root.querySelector("[name='warmup']")?.addEventListener("change", (event) => {
     if (!editingSetId) draftSet.warmup = event.target.checked;
-    if (!event.target.checked) applySuggestedWorkValues(root);
+    applySuggestedStrengthValues(root);
     updateStrengthComparison(root);
   });
   root.querySelectorAll("[data-set-field]").forEach((input) => {
@@ -1342,7 +1363,7 @@ function bindEvents(root) {
       draftSet.warmup = reserve >= 6;
     }
     root.querySelector("#reserveText").textContent = reserveName(reserve);
-    if (reserve < 6) applySuggestedWorkValues(root);
+    applySuggestedStrengthValues(root);
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
@@ -1548,9 +1569,7 @@ function saveSet(event) {
       createdAt: Date.now()
     });
     lastTouchedSetId = id;
-    draftSet = warmup
-      ? { weight: String(weight), reps: String(reps), reserve, warmup: true }
-      : suggestedDraftSet(form.dataset.id, { weight: String(weight), reps: String(reps), reserve, warmup: false });
+    draftSet = suggestedDraftSet(form.dataset.id, { weight: String(weight), reps: String(reps), reserve, warmup });
   }
   saveState();
   render();
