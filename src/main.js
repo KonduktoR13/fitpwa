@@ -1592,6 +1592,8 @@ function startEditSet(id) {
   editingSetId = id;
   activeSetField = "weight";
   lastTouchedSetId = id;
+  route = { name: "exercise", id: set.exerciseId };
+  window.scrollTo({ top: 0, behavior: "instant" });
   render();
 }
 
