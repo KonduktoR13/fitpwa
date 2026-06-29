@@ -383,7 +383,9 @@ function sessionMetrics(items) {
   }
   const work = items.filter((set) => !set.warmup);
   const source = work.length ? work : items;
-  const top = source.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), source[0]);
+  const top = work.length
+    ? work.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), work[0])
+    : null;
   const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
   const pureE1rm = top ? e1rm(top) : 0;
   const score = top ? adjustedScore(top) : 0;
@@ -413,7 +415,9 @@ function sessionMetrics(items) {
 }
 
 function progressForExercise(exerciseId) {
-  return groupSetsByWorkout(setsForExercise(exerciseId)).map(sessionMetrics);
+  return groupSetsByWorkout(setsForExercise(exerciseId))
+    .map(sessionMetrics)
+    .filter((session) => session.type === "cardio" || session.workCount > 0);
 }
 
 function latestExerciseStats(exerciseId) {
@@ -803,6 +807,22 @@ function renderSetComparison(exerciseId, formValues) {
       <strong>${delta == null ? "Введите вес и повторы" : trendText(current, previousScore)}</strong>
     </div>
   `;
+}
+
+function strengthFormValues(form) {
+  return {
+    weight: form.elements.weight?.value || "",
+    reps: form.elements.reps?.value || "",
+    reserve: Number(form.elements.reserve?.value || 0),
+    warmup: Boolean(form.elements.warmup?.checked)
+  };
+}
+
+function updateStrengthComparison(root) {
+  const form = root.querySelector("[data-form='set'][data-kind='strength']");
+  const comparison = form?.querySelector(".comparison");
+  if (!form || !comparison) return;
+  comparison.outerHTML = renderSetComparison(form.dataset.id, strengthFormValues(form));
 }
 
 function renderSetRow(set) {
@@ -1233,9 +1253,11 @@ function bindEvents(root) {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
     root.querySelector("#reserveText").textContent = reserveName(Number(event.target.value));
     event.target.style.setProperty("--thumb-color", reserveColor(Number(event.target.value)));
+    updateStrengthComparison(root);
   });
   root.querySelector("[name='warmup']")?.addEventListener("change", (event) => {
     if (!editingSetId) draftSet.warmup = event.target.checked;
+    updateStrengthComparison(root);
   });
   root.querySelectorAll("[data-set-field]").forEach((input) => {
     input.addEventListener("focus", () => {
@@ -1248,6 +1270,7 @@ function bindEvents(root) {
     });
     input.addEventListener("input", () => {
       if (!editingSetId) draftSet[input.dataset.setField] = input.value;
+      updateStrengthComparison(root);
     });
   });
   root.querySelectorAll("[data-step-field]").forEach((button) => button.addEventListener("click", () => {
@@ -1256,8 +1279,12 @@ function bindEvents(root) {
     const next = Math.max(button.dataset.stepField === "weight" ? 1 : 1, current + Number(button.dataset.delta));
     input.value = button.dataset.stepField === "weight" ? formatWeight(next).replace(",", ".") : String(Math.round(next));
     if (!editingSetId) draftSet[button.dataset.stepField] = input.value;
+    updateStrengthComparison(root);
   }));
-  root.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => handleKeypad(button.dataset.key)));
+  root.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => {
+    handleKeypad(button.dataset.key);
+    updateStrengthComparison(root);
+  }));
   root.querySelector("[data-action='toggle-keyboard']")?.addEventListener("click", () => {
     nativeKeyboard = !nativeKeyboard;
     render();
@@ -1273,6 +1300,7 @@ function bindEvents(root) {
       draftSet.warmup = reserve >= 6;
     }
     root.querySelector("#reserveText").textContent = reserveName(reserve);
+    updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='cardio']");
@@ -1308,6 +1336,7 @@ function bindEvents(root) {
     form.elements.reserve.value = button.dataset.reserve;
     draftSet = { ...draftSet, weight: button.dataset.weight, reps: button.dataset.reps, reserve: Number(button.dataset.reserve) };
     root.querySelector("#reserveText").textContent = reserveName(draftSet.reserve);
+    updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='delete-set']").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
