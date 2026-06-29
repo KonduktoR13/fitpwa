@@ -1262,11 +1262,11 @@ function bindEvents(root) {
   root.querySelectorAll("[data-set-field]").forEach((input) => {
     input.addEventListener("focus", () => {
       activeSetField = input.dataset.setField;
-      render();
+      root.querySelectorAll("[data-set-field]").forEach((item) => item.classList.toggle("active", item === input));
     });
     input.addEventListener("click", () => {
       activeSetField = input.dataset.setField;
-      render();
+      root.querySelectorAll("[data-set-field]").forEach((item) => item.classList.toggle("active", item === input));
     });
     input.addEventListener("input", () => {
       if (!editingSetId) draftSet[input.dataset.setField] = input.value;
@@ -1476,6 +1476,7 @@ function saveSet(event) {
   const reps = Number(data.get("reps"));
   if (!Number.isFinite(weight) || weight <= 0 || !Number.isInteger(reps) || reps <= 0) return;
   const reserve = Number(data.get("reserve"));
+  const warmup = data.get("warmup") === "on";
   if (existing) {
     existing.type = "strength";
     existing.weight = weight;
@@ -1487,7 +1488,7 @@ function saveSet(event) {
     delete existing.distanceKm;
     delete existing.setting;
     delete existing.effort;
-    existing.warmup = data.get("warmup") === "on";
+    existing.warmup = warmup;
     existing.updatedAt = Date.now();
     lastTouchedSetId = existing.id;
     editingSetId = null;
@@ -1500,11 +1501,11 @@ function saveSet(event) {
       weight,
       reps,
       reserve,
-      warmup: data.get("warmup") === "on",
+      warmup,
       createdAt: Date.now()
     });
     lastTouchedSetId = id;
-    draftSet = { weight: String(weight), reps: String(reps), reserve, warmup: false };
+    draftSet = { weight: String(weight), reps: String(reps), reserve, warmup };
   }
   saveState();
   render();
