@@ -869,8 +869,8 @@ function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
       ${renderStrengthQuickChips(exercise.id, allSets, previous)}
       <div class="input-pair">
-        <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-2.5">−</button><input inputmode="none" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="2.5">+</button></div></label>
-        <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="none" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
+        <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-2.5">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="2.5">+</button></div></label>
+        <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="${nativeKeyboard ? "numeric" : "none"}" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
       </div>
       ${keypadOpen ? renderKeypad() : ""}
       <label class="effort-label"><span>Запас повторов: <strong id="reserveText">${reserveName(formValues.reserve)}</strong></span><input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" /></label>
@@ -1138,11 +1138,13 @@ function renderSparkline(values) {
   const points = clean.map((value, index) => {
     const x = clean.length === 1 ? width / 2 : (index / (clean.length - 1)) * width;
     const y = height - ((value - min) / range) * (height - 8) - 4;
-    return `${formatWeight(x).replace(",", ".")},${formatWeight(y).replace(",", ".")}`;
-  }).join(" ");
+    return { x, y };
+  });
+  const polyline = points.map(({ x, y }) => `${formatWeight(x).replace(",", ".")},${formatWeight(y).replace(",", ".")}`).join(" ");
   return `
     <svg class="sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="Короткий график прогресса">
-      <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+      <polyline points="${polyline}" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+      ${points.map(({ x, y }, index) => `<circle cx="${formatWeight(x).replace(",", ".")}" cy="${formatWeight(y).replace(",", ".")}" r="${index === points.length - 1 ? "4.8" : "3.6"}" />`).join("")}
     </svg>
   `;
 }
@@ -1926,6 +1928,7 @@ function bindEvents(root) {
     updateStrengthComparison(root);
   });
   root.querySelectorAll("[data-set-field]").forEach((input) => {
+    let clearTimer = null;
     input.addEventListener("focus", () => {
       activeSetField = input.dataset.setField;
       keypadOpen = true;
@@ -1942,6 +1945,21 @@ function bindEvents(root) {
       strengthDraftDirty = true;
       pendingSuggestionType = null;
       updateStrengthComparison(root);
+    });
+    input.addEventListener("pointerdown", () => {
+      const field = input.dataset.setField;
+      clearTimer = window.setTimeout(() => {
+        const currentInput = document.querySelector(`[data-set-field='${field}']`);
+        if (currentInput) currentInput.value = "";
+        if (!editingSetId) draftSet[field] = "";
+        strengthDraftDirty = true;
+        pendingSuggestionType = null;
+        haptic(18);
+        render();
+      }, 520);
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach((eventName) => {
+      input.addEventListener(eventName, () => window.clearTimeout(clearTimer));
     });
   });
   root.querySelectorAll("[data-step-field]").forEach((button) => button.addEventListener("click", () => {
@@ -1960,7 +1978,9 @@ function bindEvents(root) {
   }));
   root.querySelector("[data-action='toggle-keyboard']")?.addEventListener("click", () => {
     nativeKeyboard = !nativeKeyboard;
+    keypadOpen = true;
     render();
+    window.setTimeout(() => document.querySelector(`[data-set-field='${activeSetField}']`)?.focus(), 30);
   });
   root.querySelectorAll("[data-action='set-reserve']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set']");

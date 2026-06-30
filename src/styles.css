@@ -682,6 +682,12 @@ h3 {
   overflow: visible;
 }
 
+.sparkline circle {
+  fill: #fff;
+  stroke: currentColor;
+  stroke-width: 3;
+}
+
 .sparkline.empty {
   border: 1px dashed var(--line);
   border-radius: 8px;
