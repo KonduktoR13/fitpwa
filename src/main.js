@@ -59,7 +59,7 @@ let serviceWorkerRegistration = null;
 let historyCursor = new Date();
 let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
-let expandedExerciseGroups = new Set();
+let expandedExerciseGroups = new Set(["active"]);
 let exerciseSearchQuery = "";
 let progressChartTab = "strength";
 let cardioProgressTab = "performance";
@@ -177,6 +177,7 @@ function saveState() {
 
 function setRoute(next) {
   route = next;
+  if (next.name === "home") expandedExerciseGroups.add("active");
   if (next.name !== "exercise") {
     editingSetId = null;
     editingReturnRoute = null;
@@ -704,7 +705,7 @@ function renderHome() {
   const grouped = categories.map(([key, title]) => [
     key,
     title,
-    state.exercises.filter((item) => item.category === key && !activeIds.has(item.id) && matchesQuery(item))
+    state.exercises.filter((item) => item.category === key && matchesQuery(item))
   ]);
   return `
     <section class="hero">
@@ -739,8 +740,11 @@ function renderHome() {
     ${exerciseFormOpen ? renderExerciseForm() : ""}
     <section class="exercise-groups">
       ${activeExercises.length ? `
-        <div class="group active-group">
-          <div class="group-title static"><h2>В работе</h2><span>${activeExercises.length}</span></div>
+        <div class="group active-group ${query || expandedExerciseGroups.has("active") ? "expanded" : "collapsed"}">
+          <button class="group-title" data-action="toggle-exercise-group" data-group="active">
+            <h2>В работе</h2>
+            <span>${activeExercises.length}</span>
+          </button>
           <div class="exercise-list">
             ${activeExercises.map(renderExerciseCard).join("")}
           </div>
