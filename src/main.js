@@ -708,10 +708,10 @@ function renderHome() {
     state.exercises.filter((item) => item.category === key && matchesQuery(item))
   ]);
   return `
-    <section class="hero">
+    <section class="hero home-hero">
       <div>
         <p class="eyebrow">Ручной режим</p>
-        <h1>Выбери упражнение</h1>
+        <h1>Упражнения</h1>
       </div>
       <div class="hero-stats">
         <div><strong>${state.exercises.length}</strong><span>упражнений</span></div>

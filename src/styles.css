@@ -166,6 +166,23 @@ h3 {
   padding: 28px 0 20px;
 }
 
+.home-hero {
+  grid-template-columns: auto minmax(220px, 360px);
+  align-items: center;
+  min-height: auto;
+  padding: 12px 0 14px;
+}
+
+.home-hero h1 {
+  font-size: 1.65rem;
+  line-height: 1.05;
+}
+
+.home-hero .eyebrow {
+  margin-bottom: 3px;
+  font-size: 0.78rem;
+}
+
 .eyebrow {
   margin-bottom: 12px;
   color: var(--primary);
@@ -204,11 +221,19 @@ h3 {
   padding: 14px;
 }
 
+.home-hero .hero-stats div {
+  padding: 9px 10px;
+}
+
 .hero-stats strong,
 .metrics-row strong,
 .insight strong {
   font-size: 1.55rem;
   line-height: 1;
+}
+
+.home-hero .hero-stats strong {
+  font-size: 1.1rem;
 }
 
 .toolbar,
@@ -1317,6 +1342,10 @@ h3 {
 
   .hero {
     min-height: 320px;
+  }
+
+  .home-hero {
+    min-height: auto;
   }
 
   .hero-stats,
