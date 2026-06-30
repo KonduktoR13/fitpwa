@@ -59,6 +59,8 @@ let serviceWorkerRegistration = null;
 let historyCursor = new Date();
 let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
+let expandedExerciseGroups = new Set();
+let exerciseSearchQuery = "";
 let progressChartTab = "strength";
 let cardioProgressTab = "performance";
 let expandedProgressWarmups = new Set();
@@ -693,7 +695,17 @@ function renderHome() {
   const trainedToday = state.sets.filter((set) => dayKey(set.createdAt) === dayKey(Date.now())).length;
   const todayItems = setsByDay().get(dayKey(Date.now())) || [];
   const todaySummary = daySummary(todayItems);
-  const grouped = categories.map(([key, title]) => [key, title, state.exercises.filter((item) => item.category === key)]);
+  const query = exerciseSearchQuery.trim().toLowerCase();
+  const matchesQuery = (exercise) => !query || `${exercise.name} ${label(equipment, exercise.equipmentType)} ${label(categories, exercise.category)}`.toLowerCase().includes(query);
+  const activeIds = new Set(state.sets.map((set) => set.exerciseId));
+  const activeExercises = state.exercises
+    .filter((exercise) => activeIds.has(exercise.id) && matchesQuery(exercise))
+    .sort((a, b) => (latestExerciseStats(b.id).last?.date || 0) - (latestExerciseStats(a.id).last?.date || 0));
+  const grouped = categories.map(([key, title]) => [
+    key,
+    title,
+    state.exercises.filter((item) => item.category === key && !activeIds.has(item.id) && matchesQuery(item))
+  ]);
   return `
     <section class="hero">
       <div>
@@ -721,16 +733,27 @@ function renderHome() {
       </section>
     ` : ""}
     <section class="toolbar">
-      <input type="search" id="search" placeholder="Найти упражнение" autocomplete="off" />
+      <input type="search" id="search" placeholder="Найти упражнение" autocomplete="off" value="${exerciseSearchQuery}" />
       <button class="primary" data-action="toggle-form">Новое</button>
     </section>
     ${exerciseFormOpen ? renderExerciseForm() : ""}
     <section class="exercise-groups">
+      ${activeExercises.length ? `
+        <div class="group active-group">
+          <div class="group-title static"><h2>В работе</h2><span>${activeExercises.length}</span></div>
+          <div class="exercise-list">
+            ${activeExercises.map(renderExerciseCard).join("")}
+          </div>
+        </div>
+      ` : ""}
       ${grouped
         .filter(([, , items]) => items.length)
         .map(([key, title, items]) => `
-          <div class="group ${key === "cardio" ? "cardio-group" : ""}">
-            <div class="group-title"><h2>${title}</h2><span>${items.length}</span></div>
+          <div class="group ${key === "cardio" ? "cardio-group" : ""} ${query || expandedExerciseGroups.has(key) ? "expanded" : "collapsed"}">
+            <button class="group-title" data-action="toggle-exercise-group" data-group="${key}">
+              <h2>${title}</h2>
+              <span>${items.length}</span>
+            </button>
             <div class="exercise-list">
               ${items.map(renderExerciseCard).join("")}
             </div>
@@ -1887,6 +1910,11 @@ function bindEvents(root) {
     historyCursor = shiftMonth(historyCursor, Number(button.dataset.delta));
     render();
   }));
+  root.querySelectorAll("[data-action='toggle-exercise-group']").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.group;
+    expandedExerciseGroups.has(key) ? expandedExerciseGroups.delete(key) : expandedExerciseGroups.add(key);
+    render();
+  }));
   root.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
     const exercise = state.exercises.find((item) => item.id === card.dataset.openExercise);
     draftSet = exercise && !isCardioExercise(exercise)
@@ -1899,10 +1927,13 @@ function bindEvents(root) {
     setRoute({ name: "exercise", id: card.dataset.openExercise });
   }));
   root.querySelector("#search")?.addEventListener("input", (event) => {
-    const query = event.target.value.trim().toLowerCase();
-    root.querySelectorAll(".exercise-card").forEach((card) => {
-      card.hidden = query && !card.innerText.toLowerCase().includes(query);
-    });
+    exerciseSearchQuery = event.target.value;
+    render();
+    window.setTimeout(() => {
+      const search = document.querySelector("#search");
+      search?.focus();
+      search?.setSelectionRange(search.value.length, search.value.length);
+    }, 0);
   });
   root.querySelector("[data-form='exercise']")?.addEventListener("submit", saveExercise);
   root.querySelector("[data-form='set']")?.addEventListener("submit", saveSet);
