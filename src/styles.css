@@ -674,15 +674,19 @@ h3 {
 }
 
 .sparkline {
+  display: block;
   width: 100%;
-  min-height: 42px;
+  height: 44px;
+  max-height: 44px;
   color: var(--primary);
+  overflow: visible;
 }
 
 .sparkline.empty {
   border: 1px dashed var(--line);
   border-radius: 8px;
-  min-height: 42px;
+  height: 44px;
+  min-height: 44px;
   background: color-mix(in srgb, var(--surface-2) 55%, #fff);
 }
 
