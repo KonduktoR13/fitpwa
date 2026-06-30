@@ -177,7 +177,7 @@ function saveState() {
 
 function setRoute(next) {
   route = next;
-  if (next.name === "home") expandedExerciseGroups.add("active");
+  if (next.name === "home") expandedExerciseGroups = new Set(["active"]);
   if (next.name !== "exercise") {
     editingSetId = null;
     editingReturnRoute = null;
