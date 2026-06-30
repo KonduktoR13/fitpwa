@@ -45,6 +45,10 @@ let draftCardio = { minutes: "", seconds: "", distanceM: "", setting: "" };
 let exerciseFormOpen = false;
 let chartRefs = [];
 let activeSetField = "weight";
+let keypadOpen = false;
+let strengthDraftDirty = false;
+let pendingSuggestionType = null;
+let formError = "";
 let nativeKeyboard = false;
 let editingSetId = null;
 let editingReturnRoute = null;
@@ -174,6 +178,8 @@ function setRoute(next) {
   if (next.name !== "exercise") {
     editingSetId = null;
     editingReturnRoute = null;
+    keypadOpen = false;
+    formError = "";
   }
   window.scrollTo({ top: 0, behavior: "instant" });
   render();
@@ -568,9 +574,40 @@ function previousStrengthTarget(exerciseId, warmup, index = todayStrengthIndex(e
   return previous[index] || null;
 }
 
+function todayStrengthSets(exerciseId, warmup = null) {
+  return state.sets
+    .filter((set) => (
+      set.exerciseId === exerciseId &&
+      !isCardioSet(set) &&
+      dayKey(set.createdAt) === dayKey(Date.now()) &&
+      (warmup == null || Boolean(set.warmup) === warmup)
+    ))
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+function defaultStrengthType(exerciseId) {
+  const todayWarmups = todayStrengthSets(exerciseId, true);
+  const todayWork = todayStrengthSets(exerciseId, false);
+  if (!todayWarmups.length && !todayWork.length) return true;
+  if (todayWarmups.length && !todayWork.length) return true;
+  return false;
+}
+
 function suggestedDraftSet(exerciseId, fallback = {}) {
-  const warmup = fallback.warmup ?? true;
-  const target = previousStrengthTarget(exerciseId, warmup);
+  const warmup = fallback.warmup ?? defaultStrengthType(exerciseId);
+  const todaySameType = todayStrengthSets(exerciseId, warmup);
+  const previousSession = previousWorkoutSets(exerciseId);
+  const previousSameType = previousSession
+    .filter((set) => !isCardioSet(set) && Boolean(set.warmup) === warmup)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const previousAny = previousSession
+    .filter((set) => !isCardioSet(set))
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const target = previousSameType[todaySameType.length] ||
+    todaySameType.at(-1) ||
+    previousSameType[0] ||
+    previousAny.at(-1) ||
+    null;
   return {
     weight: target ? String(target.weight) : fallback.weight || "",
     reps: target ? String(target.reps) : fallback.reps || "8",
@@ -661,7 +698,7 @@ function renderHome() {
     <section class="hero">
       <div>
         <p class="eyebrow">Ручной режим</p>
-        <h1>Выбери упражнение и записывай подходы по факту</h1>
+        <h1>Выбери упражнение</h1>
       </div>
       <div class="hero-stats">
         <div><strong>${state.exercises.length}</strong><span>упражнений</span></div>
@@ -707,19 +744,41 @@ function renderHome() {
 function renderExerciseCard(exercise) {
   const { last, prev, sessions } = latestExerciseStats(exercise.id);
   const setCount = setsForExercise(exercise.id).length;
-  const delta = last && prev ? last.score - prev.score : null;
-  const deltaClass = delta == null ? "" : delta >= 0 ? "good" : "bad";
   const cardio = isCardioExercise(exercise);
+  const rowing = isRowingExercise(exercise);
+  const strengthDelta = !cardio && last && prev && last.bestSessionE1RM && prev.bestSessionE1RM
+    ? last.bestSessionE1RM - prev.bestSessionE1RM
+    : null;
+  const cardioDelta = cardio && last && prev ? last.score - prev.score : null;
+  const delta = cardio ? cardioDelta : strengthDelta;
+  const deltaTone = delta == null || Math.abs(delta) < 0.05 ? "" : delta > 0 ? "good" : "bad";
+  const mainValue = !last
+    ? "Нет истории"
+    : cardio
+      ? rowing && last.pace500Sec ? `${formatDuration(last.pace500Sec)} /500 м` : formatWeight(last.performanceScore || last.score)
+      : last.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—";
+  const mainLabel = !last
+    ? `${label(equipment, exercise.equipmentType)} · нет истории`
+    : cardio
+      ? rowing ? "темп последней" : "производительность"
+      : "расч. максимум";
+  const deltaText = !last
+    ? ""
+    : delta == null
+      ? `${sessions.length} трен. · ${setCount} подх.`
+      : cardio
+        ? trendText(last.score, prev.score)
+        : e1rmDeltaText(last, prev);
   return `
-    <article class="exercise-card" data-open-exercise="${exercise.id}">
+    <article class="exercise-card ${last ? "has-history" : "empty-history"}" data-open-exercise="${exercise.id}">
       <div class="exercise-icon">${iconHtml(exercise)}</div>
       <div class="exercise-main">
         <h3>${exercise.name}</h3>
-        <p>${label(equipment, exercise.equipmentType)} · ${sessions.length} трен. · ${setCount} подх.</p>
+        <p>${mainLabel}</p>
       </div>
-      <div class="exercise-score ${deltaClass}">
-        <strong>${last ? cardio ? formatWeight(last.score) : last.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—" : "—"}</strong>
-        <span>${cardio ? delta == null ? "нет сравнения" : trendText(last.score, prev.score) : e1rmDeltaText(last, prev)}</span>
+      <div class="exercise-score ${deltaTone}">
+        <strong>${mainValue}</strong>
+        <span>${deltaText}</span>
       </div>
     </article>
   `;
@@ -767,6 +826,10 @@ function renderExercise(exerciseId) {
   const last = sessions.at(-1);
   const previous = sessions.at(-2);
   const editingSet = state.sets.find((set) => set.id === editingSetId && set.exerciseId === exerciseId);
+  const todayWorkSets = todaySets.filter((set) => !isCardioSet(set) && !set.warmup);
+  const e1rmDelta = !isCardio && last && previous && last.bestSessionE1RM && previous.bestSessionE1RM
+    ? last.bestSessionE1RM - previous.bestSessionE1RM
+    : null;
   const formValues = editingSet
     ? {
         weight: String(editingSet.weight),
@@ -785,41 +848,41 @@ function renderExercise(exerciseId) {
       <button data-action="edit-exercise" data-id="${exercise.id}">Править</button>
     </section>
     <section class="metrics-row">
-      <div><span>Сегодня</span><strong>${todaySets.length}</strong></div>
-      <div><span>${isCardio ? "Всего сегодня" : "Лучший индекс"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + cardioDurationSec(set), 0)) : last ? formatWeight(Math.max(...sessions.map((s) => s.score))) : "—"}</strong></div>
-      <div><span>Динамика</span><strong>${last && previous ? trendText(last.score, previous.score) : "—"}</strong></div>
+      <div><span>Сегодня</span><strong>${isCardio ? todaySets.length : todayWorkSets.length ? `${todayWorkSets.length} раб.` : "0"}</strong></div>
+      <div><span>${isCardio ? "Всего сегодня" : "Расч. максимум"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + cardioDurationSec(set), 0)) : last?.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—"}</strong></div>
+      <div class="${e1rmDelta == null ? "" : e1rmDelta >= 0 ? "good" : "bad"}"><span>Динамика</span><strong>${isCardio ? last && previous ? trendText(last.score, previous.score) : "—" : e1rmDelta == null ? "—" : e1rmDeltaText(last, previous)}</strong></div>
     </section>
     ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, allSets, previous)}
     <section class="panel">
       <div class="section-head"><h2>Подходы сегодня</h2><span>${formatDate(Date.now())}</span></div>
-      ${todaySets.length ? `<div class="sets-list">${todaySets.map(renderSetRow).join("")}</div>` : `<p class="muted">Сегодня по этому упражнению ещё нет подходов.</p>`}
+      ${todaySets.length ? `<div class="sets-list today-sets">${todaySets.map((set, index) => isCardioSet(set) ? renderSetRow(set) : renderTodayStrengthSetRow(set, index)).join("")}</div>` : `<p class="muted">Сегодня по этому упражнению ещё нет подходов.</p>`}
     </section>
-    <section class="panel">
-      <div class="section-head"><h2>Прогресс упражнения</h2><button data-action="progress-exercise" data-id="${exercise.id}">Подробнее</button></div>
-      ${renderMiniProgress(exercise.id)}
-    </section>
+    ${renderCompactProgressCard(exercise)}
   `;
 }
 
 function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous) {
+  const invalid = validateStrengthDraft(formValues);
+  const showPending = pendingSuggestionType != null && strengthDraftDirty && !editingSet;
   return `
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
-      <div class="quick-row">
-        ${allSets.at(-1) && !isCardioSet(allSets.at(-1)) ? `<button type="button" data-action="repeat-last" data-weight="${allSets.at(-1).weight}" data-reps="${allSets.at(-1).reps}" data-reserve="${reserveValue(allSets.at(-1))}">Повторить последний: ${formatWeight(allSets.at(-1).weight)} × ${allSets.at(-1).reps}</button>` : ""}
-        ${previous?.top && !isCardioSet(previous.top) ? `<button type="button" data-action="repeat-best" data-weight="${previous.top.weight}" data-reps="${previous.top.reps}" data-reserve="${reserveValue(previous.top)}">Лучший прошлый: ${formatWeight(previous.top.weight)} × ${previous.top.reps}</button>` : ""}
-        <button type="button" data-action="set-reserve" data-reserve="2">Рабочий запас 2</button>
-        <button type="button" data-action="set-reserve" data-reserve="6">Разминка запас 6</button>
-      </div>
+      ${renderStrengthQuickChips(exercise.id, allSets, previous)}
       <div class="input-pair">
         <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-2.5">−</button><input inputmode="none" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="2.5">+</button></div></label>
         <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="none" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
       </div>
-      ${renderKeypad()}
+      ${keypadOpen ? renderKeypad() : ""}
       <label class="effort-label"><span>Запас повторов: <strong id="reserveText">${reserveName(formValues.reserve)}</strong></span><input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" /></label>
-      <label class="warmup-toggle"><input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} /> Разминка</label>
+      <div class="rir-chips">
+        ${[0, 1, 2, 3, 5, 10].map((value) => `<button type="button" data-action="set-reserve-only" data-reserve="${value}" class="${Number(formValues.reserve) === value ? "active" : ""}">${value === 0 ? "0 отказ" : value}</button>`).join("")}
+      </div>
+      <label class="warmup-toggle"><input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} /> <span>Разминка</span></label>
+      <p class="muted warmup-note">${formValues.warmup ? "Разминка не влияет на прогресс." : "Рабочий подход влияет на прогресс."}</p>
+      ${showPending ? `<button type="button" class="ghost apply-suggestion" data-action="apply-suggestion" data-warmup="${pendingSuggestionType ? "true" : "false"}">${pendingSuggestionType ? "Подставить разминку" : "Подставить рабочий"}</button>` : ""}
       ${renderSetComparison(exercise.id, formValues)}
-      <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
+      ${formError || invalid ? `<p class="form-error">${formError || invalid}</p>` : ""}
+      <button class="primary save-set" type="submit" ${invalid ? "disabled" : ""}>${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
     </form>
   `;
 }
@@ -857,6 +920,7 @@ function renderCardioEntry(exercise, editingSet) {
         ${elliptical ? `<strong>Эллипс: спокойное кардио</strong><span>Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.</span>` : ""}
         ${!rowing && !elliptical ? `<span>Настройка сохраняется как контекст. Она не считается сложностью и не влияет на прогресс.</span>` : ""}
       </div>
+      ${formError ? `<p class="form-error">${formError}</p>` : ""}
       <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать кардио"}</button>
     </form>
   `;
@@ -948,6 +1012,8 @@ function applySuggestedStrengthValues(root) {
   if (!editingSetId) {
     draftSet = { ...draftSet, ...suggestion };
   }
+  strengthDraftDirty = false;
+  pendingSuggestionType = null;
   root.querySelector("#reserveText").textContent = reserveName(suggestion.reserve);
   updateStrengthComparison(root);
 }
@@ -980,6 +1046,55 @@ function renderSetRow(set) {
   `;
 }
 
+function validateStrengthDraft(values) {
+  const weight = Number(String(values.weight || "").replace(",", "."));
+  const reps = Number(values.reps || 0);
+  const reserve = Number(values.reserve);
+  if (!Number.isFinite(weight) || weight <= 0) return "Вес должен быть больше 0";
+  if (!Number.isInteger(reps) || reps <= 0) return "Повторы должны быть больше 0";
+  if (!Number.isFinite(reserve) || reserve < 0) return "Запас должен быть 0 или больше";
+  return "";
+}
+
+function rirIntensity(value) {
+  const rir = reserveValue({ reserve: value });
+  if (rir <= 1) return "очень тяжело";
+  if (rir <= 3) return "тяжело";
+  if (rir <= 5) return "средне";
+  return "легко";
+}
+
+function renderTodayStrengthSetRow(set, index) {
+  const valid = validE1rmSet(set);
+  const score = valid ? estimatedE1rm(set) : null;
+  return `
+    <div class="set-row strength-today ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="use-set" data-id="${set.id}">
+      <strong>${index + 1}. ${set.warmup ? "Разм." : "Раб."} ${formatWeight(set.weight)} × ${set.reps} · <span class="rir-badge">RIR ${reserveValue(set)}</span></strong>
+      <span>${rirIntensity(reserveValue(set))}${set.warmup ? "" : valid ? ` · e1RM ${formatWeight(score)}` : " · e1RM не считается: reps + RIR > 15"} · ${formatDateTime(set.createdAt)}</span>
+      <div class="set-actions">
+        <button data-action="edit-set" data-id="${set.id}" aria-label="Редактировать подход">✎</button>
+        <button data-action="delete-set" data-id="${set.id}" aria-label="Удалить подход">×</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStrengthQuickChips(exerciseId, allSets, previous) {
+  const chips = [];
+  const last = allSets.filter((set) => !isCardioSet(set)).at(-1);
+  if (last) {
+    chips.push(`<button type="button" data-action="apply-set-chip" data-weight="${last.weight}" data-reps="${last.reps}" data-reserve="${reserveValue(last)}" data-warmup="${Boolean(last.warmup)}">Повторить последний: ${formatWeight(last.weight)} × ${last.reps}</button>`);
+  }
+  if (previous?.top && !isCardioSet(previous.top)) {
+    chips.push(`<button type="button" data-action="apply-set-chip" data-weight="${previous.top.weight}" data-reps="${previous.top.reps}" data-reserve="${reserveValue(previous.top)}" data-warmup="false">Лучший прошлый: ${formatWeight(previous.top.weight)} × ${previous.top.reps}</button>`);
+  }
+  const previousWork = previousStrengthSets(exerciseId, false).at(-1);
+  const previousWarmup = previousStrengthSets(exerciseId, true).at(-1);
+  chips.push(`<button type="button" data-action="set-reserve-only" data-reserve="${previousWork ? reserveValue(previousWork) : 2}">Рабочий запас ${previousWork ? reserveValue(previousWork) : 2}</button>`);
+  chips.push(`<button type="button" data-action="set-reserve-only" data-reserve="${previousWarmup ? reserveValue(previousWarmup) : 6}">Разминка запас ${previousWarmup ? reserveValue(previousWarmup) : 6}</button>`);
+  return `<div class="quick-row">${chips.slice(0, 4).join("")}</div>`;
+}
+
 function renderKeypad() {
   const decimalDisabled = activeSetField === "reps" ? "disabled" : "";
   return `
@@ -1010,6 +1125,53 @@ function renderMiniProgress(exerciseId) {
       : `${formatDate(s.date)} · e1RM ${s.bestSessionE1RM ? formatWeight(s.bestSessionE1RM) : "—"} кг · ${formatWeight(s.avgReserve)} RIR`)
   });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
+}
+
+function renderSparkline(values) {
+  const clean = values.filter((value) => Number.isFinite(Number(value))).slice(-6);
+  if (clean.length < 2) return `<div class="sparkline empty"></div>`;
+  const width = 180;
+  const height = 42;
+  const max = Math.max(...clean);
+  const min = Math.min(...clean);
+  const range = max - min || 1;
+  const points = clean.map((value, index) => {
+    const x = clean.length === 1 ? width / 2 : (index / (clean.length - 1)) * width;
+    const y = height - ((value - min) / range) * (height - 8) - 4;
+    return `${formatWeight(x).replace(",", ".")},${formatWeight(y).replace(",", ".")}`;
+  }).join(" ");
+  return `
+    <svg class="sparkline" viewBox="0 0 ${width} ${height}" role="img" aria-label="Короткий график прогресса">
+      <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  `;
+}
+
+function renderCompactProgressCard(exercise) {
+  const sessions = progressForExercise(exercise.id);
+  const last = sessions.at(-1);
+  const previous = sessions.at(-2);
+  const cardio = isCardioExercise(exercise);
+  const values = cardio ? sessions.map((session) => session.score) : sessions.map((session) => session.bestSessionE1RM).filter(Boolean);
+  const main = cardio
+    ? last ? `Производительность ${formatWeight(last.performanceScore || last.score)}` : "Недостаточно данных"
+    : last?.bestSessionE1RM ? `Расч. максимум ${formatWeight(last.bestSessionE1RM)} кг` : "Недостаточно данных";
+  const trend = sessions.length < 2
+    ? "Недостаточно данных для тренда"
+    : sessions.length === 2
+      ? "Тренд предварительный"
+      : cardio ? trendText(last.score, previous.score) : e1rmDeltaText(last, previous);
+  return `
+    <section class="panel compact-progress-card">
+      <div>
+        <span>Прогресс упражнения</span>
+        <strong>${main}</strong>
+        <small>${trend}</small>
+      </div>
+      ${renderSparkline(values)}
+      <button data-action="progress-exercise" data-id="${exercise.id}">Подробнее</button>
+    </section>
+  `;
 }
 
 function e1rmDeltaText(last, previous) {
@@ -1406,7 +1568,7 @@ function renderProgress(selectedId) {
     pointValues: selectedIsCardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => selectedIsCardio
       ? `${formatDate(s.date)} · ${formatWeight(s.score)} производительность · ${formatDuration(s.durationSec)}`
-      : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс серии · пик ${formatWeight(s.pureE1rm)} кг 1ПМ · ${s.workCount} рабочих`)
+      : `${formatDate(s.date)} · e1RM ${formatWeight(s.score)} кг · пик ${formatWeight(s.pureE1rm)} кг 1ПМ · ${s.workCount} рабочих`)
   });
   const volumeChart = `chart-${chartRefs.length}`;
   chartRefs.push({
@@ -1568,7 +1730,7 @@ function renderSessionSummary(session) {
       </div>
       <div>
         <strong>${formatWeight(session.top.weight)} кг × ${session.top.reps}</strong>
-        <span>${formatWeight(session.score)} индекс · ${formatWeight(session.tonnage)} объём</span>
+        <span>e1RM ${formatWeight(session.score)} · ${formatWeight(session.tonnage)} объём</span>
       </div>
     </article>
   `;
@@ -1692,6 +1854,12 @@ function renderSettings() {
 }
 
 function bindEvents(root) {
+  root.addEventListener("click", (event) => {
+    if (route.name === "exercise" && keypadOpen && !event.target.closest("[data-form='set'][data-kind='strength']")) {
+      keypadOpen = false;
+      render();
+    }
+  });
   root.querySelectorAll("[data-action='home']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "home" })));
   root.querySelectorAll("[data-action='progress']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress" })));
   root.querySelectorAll("[data-action='history']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "history" })));
@@ -1720,8 +1888,12 @@ function bindEvents(root) {
   root.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
     const exercise = state.exercises.find((item) => item.id === card.dataset.openExercise);
     draftSet = exercise && !isCardioExercise(exercise)
-      ? suggestedDraftSet(exercise.id, { warmup: true })
+      ? suggestedDraftSet(exercise.id)
       : { weight: "", reps: "8", reserve: 2, warmup: false };
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
+    keypadOpen = false;
+    formError = "";
     setRoute({ name: "exercise", id: card.dataset.openExercise });
   }));
   root.querySelector("#search")?.addEventListener("input", (event) => {
@@ -1734,26 +1906,41 @@ function bindEvents(root) {
   root.querySelector("[data-form='set']")?.addEventListener("submit", saveSet);
   root.querySelector("[name='reserve']")?.addEventListener("input", (event) => {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
+    strengthDraftDirty = true;
+    pendingSuggestionType = null;
     root.querySelector("#reserveText").textContent = reserveName(Number(event.target.value));
     event.target.style.setProperty("--thumb-color", reserveColor(Number(event.target.value)));
     updateStrengthComparison(root);
   });
   root.querySelector("[name='warmup']")?.addEventListener("change", (event) => {
-    if (!editingSetId) draftSet.warmup = event.target.checked;
+    const warmup = event.target.checked;
+    if (!editingSetId) draftSet.warmup = warmup;
+    if (strengthDraftDirty && !editingSetId) {
+      pendingSuggestionType = warmup;
+      render();
+      return;
+    }
     applySuggestedStrengthValues(root);
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
     updateStrengthComparison(root);
   });
   root.querySelectorAll("[data-set-field]").forEach((input) => {
     input.addEventListener("focus", () => {
       activeSetField = input.dataset.setField;
+      keypadOpen = true;
       root.querySelectorAll("[data-set-field]").forEach((item) => item.classList.toggle("active", item === input));
+      render();
     });
     input.addEventListener("click", () => {
       activeSetField = input.dataset.setField;
+      keypadOpen = true;
       root.querySelectorAll("[data-set-field]").forEach((item) => item.classList.toggle("active", item === input));
     });
     input.addEventListener("input", () => {
       if (!editingSetId) draftSet[input.dataset.setField] = input.value;
+      strengthDraftDirty = true;
+      pendingSuggestionType = null;
       updateStrengthComparison(root);
     });
   });
@@ -1763,6 +1950,8 @@ function bindEvents(root) {
     const next = Math.max(button.dataset.stepField === "weight" ? 1 : 1, current + Number(button.dataset.delta));
     input.value = button.dataset.stepField === "weight" ? formatWeight(next).replace(",", ".") : String(Math.round(next));
     if (!editingSetId) draftSet[button.dataset.stepField] = input.value;
+    strengthDraftDirty = true;
+    pendingSuggestionType = null;
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => {
@@ -1785,6 +1974,17 @@ function bindEvents(root) {
     }
     root.querySelector("#reserveText").textContent = reserveName(reserve);
     applySuggestedStrengthValues(root);
+    updateStrengthComparison(root);
+  }));
+  root.querySelectorAll("[data-action='set-reserve-only']").forEach((button) => button.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set'][data-kind='strength']");
+    const reserve = Number(button.dataset.reserve);
+    if (!form) return;
+    form.elements.reserve.value = reserve;
+    if (!editingSetId) draftSet.reserve = reserve;
+    strengthDraftDirty = true;
+    pendingSuggestionType = null;
+    root.querySelector("#reserveText").textContent = reserveName(reserve);
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
@@ -1814,15 +2014,39 @@ function bindEvents(root) {
     if (!form || editingSetId) return;
     draftCardio[input.name] = input.value;
   }));
-  root.querySelectorAll("[data-action='repeat-last'], [data-action='repeat-best']").forEach((button) => button.addEventListener("click", () => {
+  root.querySelectorAll("[data-action='repeat-last'], [data-action='repeat-best'], [data-action='apply-set-chip']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set']");
     form.elements.weight.value = button.dataset.weight;
     form.elements.reps.value = button.dataset.reps;
     form.elements.reserve.value = button.dataset.reserve;
-    draftSet = { ...draftSet, weight: button.dataset.weight, reps: button.dataset.reps, reserve: Number(button.dataset.reserve) };
+    if (form.elements.warmup && button.dataset.warmup != null) form.elements.warmup.checked = button.dataset.warmup === "true";
+    draftSet = { ...draftSet, weight: button.dataset.weight, reps: button.dataset.reps, reserve: Number(button.dataset.reserve), warmup: form.elements.warmup?.checked || false };
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
     root.querySelector("#reserveText").textContent = reserveName(draftSet.reserve);
     updateStrengthComparison(root);
   }));
+  root.querySelectorAll("[data-action='use-set']").forEach((row) => row.addEventListener("click", () => {
+    const set = state.sets.find((item) => item.id === row.dataset.id);
+    const form = root.querySelector("[data-form='set'][data-kind='strength']");
+    if (!set || !form) return;
+    form.elements.weight.value = set.weight;
+    form.elements.reps.value = set.reps;
+    form.elements.reserve.value = reserveValue(set);
+    form.elements.warmup.checked = Boolean(set.warmup);
+    draftSet = { weight: String(set.weight), reps: String(set.reps), reserve: reserveValue(set), warmup: Boolean(set.warmup) };
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
+    root.querySelector("#reserveText").textContent = reserveName(draftSet.reserve);
+    updateStrengthComparison(root);
+  }));
+  root.querySelector("[data-action='apply-suggestion']")?.addEventListener("click", (event) => {
+    const warmup = event.currentTarget.dataset.warmup === "true";
+    draftSet = suggestedDraftSet(event.currentTarget.closest("[data-form='set']").dataset.id, { warmup });
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
+    render();
+  });
   root.querySelectorAll("[data-action='delete-set']").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     deleteSet(button.dataset.id);
@@ -1884,6 +2108,8 @@ function handleKeypad(key) {
   } else {
     draftSet[field] = value;
   }
+  strengthDraftDirty = true;
+  pendingSuggestionType = null;
 }
 
 async function saveExercise(event) {
@@ -1939,7 +2165,11 @@ function saveSet(event) {
       durationSec <= 0 ||
       !Number.isFinite(distanceM) ||
       distanceM <= 0
-    ) return;
+    ) {
+      formError = durationSec <= 0 ? "Время должно быть больше 0" : "Дистанция должна быть больше 0";
+      render();
+      return;
+    }
     if (existing) {
       existing.type = "cardio";
       existing.durationSec = durationSec;
@@ -1972,15 +2202,21 @@ function saveSet(event) {
       notify("Кардио записано", "success");
     }
     haptic([12, 30, 12]);
+    formError = "";
     saveState();
     render();
     return;
   }
   const weight = Number(String(data.get("weight")).replace(",", "."));
   const reps = Number(data.get("reps"));
-  if (!Number.isFinite(weight) || weight <= 0 || !Number.isInteger(reps) || reps <= 0) return;
   const reserve = Number(data.get("reserve"));
   const warmup = data.get("warmup") === "on";
+  const validation = validateStrengthDraft({ weight: data.get("weight"), reps: data.get("reps"), reserve, warmup });
+  if (validation) {
+    formError = validation;
+    render();
+    return;
+  }
   if (existing) {
     existing.type = "strength";
     existing.weight = weight;
@@ -1996,6 +2232,9 @@ function saveSet(event) {
     existing.updatedAt = Date.now();
     lastTouchedSetId = existing.id;
     finishSetEditing();
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
+    keypadOpen = false;
     notify("Подход изменён", "success");
   } else {
     const id = uid();
@@ -2011,14 +2250,19 @@ function saveSet(event) {
     });
     lastTouchedSetId = id;
     draftSet = suggestedDraftSet(form.dataset.id, { weight: String(weight), reps: String(reps), reserve, warmup });
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
+    keypadOpen = false;
     notify(warmup ? "Разминка записана" : "Подход записан", "success");
   }
   haptic([12, 30, 12]);
+  formError = "";
   saveState();
   render();
 }
 
 function deleteSet(id) {
+  if (!confirm("Удалить запись?")) return;
   state.sets = state.sets.filter((set) => set.id !== id);
   if (editingSetId === id) finishSetEditing();
   saveState();
