@@ -712,12 +712,22 @@ h3 {
   border-color: color-mix(in srgb, var(--primary) 44%, var(--line));
 }
 
+.progress-score.good small {
+  color: var(--primary-dark);
+  font-weight: 850;
+}
+
 .progress-score.bad {
   border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
 }
 
 .progress-score.bad strong {
   color: color-mix(in srgb, var(--danger) 72%, var(--text));
+}
+
+.progress-score.bad small {
+  color: color-mix(in srgb, var(--danger) 72%, var(--text));
+  font-weight: 850;
 }
 
 .progress-picker-shell {

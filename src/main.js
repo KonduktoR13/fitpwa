@@ -56,6 +56,7 @@ let historyCursor = new Date();
 let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
 let progressChartTab = "strength";
+let cardioProgressTab = "performance";
 let expandedProgressWarmups = new Set();
 let chartTooltip = null;
 let toast = null;
@@ -348,12 +349,26 @@ function row3000Equivalent(setOrSession) {
   return durationSec > 0 && distanceM > 0 ? durationSec * 3000 / distanceM : null;
 }
 
+function performanceDeltaText(last, previous) {
+  if (!last) return "Недостаточно данных";
+  if (!previous) return "нужна ещё одна тренировка для сравнения";
+  const delta = last.performanceScore - previous.performanceScore;
+  if (Math.abs(delta) < 0.05) return "без изменений к прошлому разу";
+  return `${delta > 0 ? "+" : "−"}${formatWeight(Math.abs(delta))} к прошлому разу`;
+}
+
+function deltaClass(delta, lowerIsBetter = false) {
+  if (delta == null || Math.abs(delta) < 0.05) return "";
+  const improved = lowerIsBetter ? delta < 0 : delta > 0;
+  return improved ? "good" : "bad";
+}
+
 function rowing3000Label(setOrSession) {
   const distanceM = cardioDistanceM(setOrSession);
   const equivalent = row3000Equivalent(setOrSession);
   if (equivalent == null) return "3000 м: —";
   const exact = Math.abs(distanceM - 3000) < 1;
-  return `${exact ? "3000 м" : "3000 м расч."}: ${formatDuration(equivalent)}`;
+  return `${exact ? "3000 м" : "3000 м по темпу"}: ${formatDuration(equivalent)}`;
 }
 
 function rowNormsText() {
@@ -385,6 +400,9 @@ function sessionMetrics(items) {
     const speedKmh = durationSec > 0 ? distanceKm / durationSec * 3600 : 0;
     const pace = distanceKm > 0 ? durationSec / distanceKm : null;
     const score = distanceKm > 0 ? distanceKm * 100 + speedKmh * 6 : durationSec / 60 * 4;
+    const pace500Sec = distanceM > 0 ? durationSec / distanceM * 500 : null;
+    const projected3000Sec = pace500Sec != null ? pace500Sec * 6 : null;
+    const settings = [...new Set(cardio.map((set) => String(set.setting || "").trim()).filter(Boolean))];
     return {
       type: "cardio",
       date: items[0]?.createdAt || Date.now(),
@@ -398,6 +416,10 @@ function sessionMetrics(items) {
       speedKmh,
       pace,
       score,
+      performanceScore: score,
+      pace500Sec,
+      projected3000Sec,
+      settings,
       tonnage: 0,
       pureE1rm: 0,
       avgReserve: 0,
@@ -831,7 +853,7 @@ function renderCardioEntry(exercise, editingSet) {
         <label class="number-control cardio-setting"><span>Настройка тренажёра</span><input inputmode="decimal" name="setting" value="${values.setting || ""}" placeholder="например 9" /></label>
       </div>
       <div class="cardio-context">
-        ${rowing ? `<strong>Гребля</strong><span>3000 м - быстрый пресет для рабочего фит-теста, обычные тренировки можно писать с любой дистанцией.</span><span>${rowNormsText()}</span><span>Заслонка/настройка сохраняется как контекст и не влияет на индекс.</span>` : ""}
+        ${rowing ? `<strong>Гребля</strong><span>3000 м - быстрый пресет для рабочего фит-теста, обычные тренировки можно писать с любой дистанцией.</span><span>${rowNormsText()}</span><span>Настройка тренажёра сохраняется только в истории и не участвует в расчёте прогресса.</span>` : ""}
         ${elliptical ? `<strong>Эллипс: спокойное кардио</strong><span>Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.</span>` : ""}
         ${!rowing && !elliptical ? `<span>Настройка сохраняется как контекст. Она не считается сложностью и не влияет на прогресс.</span>` : ""}
       </div>
@@ -938,7 +960,7 @@ function renderSetRow(set) {
     return `
       <div class="set-row cardio-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}">
         <strong>${formatDuration(cardioDurationSec(set))} · ${formatDistanceMeters(cardioDistanceM(set))}</strong>
-        <span>${rowing ? `ave/500 м ${formatDuration(rowingSplit500(set))} · ${rowing3000Label(set)}` : `${formatWeight(cardioSpeed(set))} км/ч · ${formatPace(pace)}`}${set.setting ? ` · настройка ${set.setting}` : ""} · ${formatDateTime(set.createdAt)}</span>
+        <span>${rowing ? `Темп /500 м ${formatDuration(rowingSplit500(set))} · ${rowing3000Label(set)}` : `${formatWeight(cardioSpeed(set))} км/ч · ${formatPace(pace)}`}${set.setting ? ` · настройка ${set.setting}` : ""} · ${formatDateTime(set.createdAt)}</span>
         <div class="set-actions">
           <button data-action="edit-set" data-id="${set.id}" aria-label="Редактировать кардио">✎</button>
           <button data-action="delete-set" data-id="${set.id}" aria-label="Удалить запись">×</button>
@@ -984,7 +1006,7 @@ function renderMiniProgress(exerciseId) {
     type: "line",
     pointValues: cardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => cardio
-      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDistanceKm(s.distanceKm)}`
+      ? `${formatDate(s.date)} · ${formatWeight(s.score)} производительность · ${formatDistanceKm(s.distanceKm)}`
       : `${formatDate(s.date)} · e1RM ${s.bestSessionE1RM ? formatWeight(s.bestSessionE1RM) : "—"} кг · ${formatWeight(s.avgReserve)} RIR`)
   });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
@@ -1170,6 +1192,190 @@ function renderStrengthProgress(selected, tracked) {
   `;
 }
 
+function rowingTrendWarning(sessions) {
+  if (sessions.length <= 1) return "Пока есть только одна тренировка. Сравнение появится после следующей.";
+  if (sessions.length === 2) return "Тренд предварительный: всего 2 тренировки. Линия показывает только изменение между двумя точками, а не устойчивую тенденцию.";
+  return "";
+}
+
+function rowingInsight(last, previous, sessions) {
+  const distanceText = formatDistanceKm(last.distanceKm);
+  const durationText = formatDuration(last.durationSec);
+  const paceText = formatDuration(last.pace500Sec);
+  const projectedText = formatDuration(last.projected3000Sec);
+  if (!previous) {
+    return `Первая точка по гребле: ${distanceText} за ${durationText}, средний темп ${paceText}/500 м. 3000 м по этому темпу — ${projectedText}. Сравнение появится после следующей тренировки.`;
+  }
+  const parts = [];
+  const performanceDelta = last.performanceScore - previous.performanceScore;
+  if (Math.abs(performanceDelta) < 0.05) parts.push("Производительность почти не изменилась.");
+  else parts.push(`Производительность ${performanceDelta > 0 ? "выросла" : "снизилась"} на ${formatWeight(Math.abs(performanceDelta))}.`);
+
+  const paceDelta = last.pace500Sec - previous.pace500Sec;
+  if (Math.abs(paceDelta) >= 0.5) {
+    parts.push(`Темп ${paceDelta < 0 ? "улучшился" : "стал медленнее"} на ${Math.round(Math.abs(paceDelta))} сек/500 м.`);
+  } else {
+    parts.push("Темп почти не изменился.");
+  }
+
+  const distanceDeltaM = last.distanceM - previous.distanceM;
+  if (Math.abs(distanceDeltaM) >= 1) {
+    parts.push(`Дистанция ${distanceDeltaM > 0 ? "выросла" : "стала меньше"} на ${formatDistanceMeters(Math.abs(distanceDeltaM))}.`);
+  }
+
+  const projectedDelta = last.projected3000Sec - previous.projected3000Sec;
+  if (Math.abs(projectedDelta) >= 0.5) {
+    parts.push(`Расчётные 3000 м ${projectedDelta < 0 ? "быстрее" : "медленнее"} на ${Math.round(Math.abs(projectedDelta))} сек.`);
+  }
+
+  if (sessions.length === 2) parts.push("Тренд предварительный: всего 2 тренировки.");
+  return parts.join(" ");
+}
+
+function rowingChartConfig(tab, sessions) {
+  const configs = {
+    performance: {
+      title: "Производительность",
+      subtitle: "Больше = лучше.",
+      type: "line",
+      values: sessions.map((s) => s.performanceScore),
+      details: sessions.map((s) => `${formatDate(s.date)} · производительность ${formatWeight(s.performanceScore)} · ${formatDistanceKm(s.distanceKm)}`),
+      yFormat: formatWeight
+    },
+    pace: {
+      title: "Темп /500 м",
+      subtitle: "Ниже = быстрее.",
+      type: "line",
+      invert: true,
+      values: sessions.map((s) => s.pace500Sec),
+      details: sessions.map((s) => `${formatDate(s.date)} · темп ${formatDuration(s.pace500Sec)}/500 м · ${formatDuration(s.durationSec)}`),
+      yFormat: formatDuration
+    },
+    distance: {
+      title: "Дистанция",
+      subtitle: "Дистанция за сессию.",
+      type: "bar",
+      neutral: true,
+      values: sessions.map((s) => s.distanceKm),
+      details: sessions.map((s) => `${formatDate(s.date)} · ${formatDistanceKm(s.distanceKm)} · ${formatDuration(s.durationSec)}`),
+      yFormat: (value) => `${formatWeight(value)} км`
+    },
+    projected3000: {
+      title: "3000 м",
+      subtitle: "Расчётное время на 3000 м по текущему среднему темпу. Ниже = лучше.",
+      type: "line",
+      invert: true,
+      values: sessions.map((s) => s.projected3000Sec),
+      details: sessions.map((s) => `${formatDate(s.date)} · 3000 м по темпу ${formatDuration(s.projected3000Sec)} · темп ${formatDuration(s.pace500Sec)}/500 м`),
+      yFormat: formatDuration
+    }
+  };
+  return configs[tab] || configs.performance;
+}
+
+function renderRowingChartTabs(active) {
+  const tabs = [
+    ["performance", "Производительность"],
+    ["pace", "Темп"],
+    ["distance", "Дистанция"],
+    ["projected3000", "3000 м"]
+  ];
+  return `<div class="progress-tabs rowing-tabs">${tabs.map(([key, title]) => `<button class="${active === key ? "active" : ""}" data-action="cardio-progress-tab" data-tab="${key}">${title}</button>`).join("")}</div>`;
+}
+
+function renderRowingSessionSummary(session) {
+  const sessions = progressForExercise(session.top.exerciseId);
+  const bestScore = Math.max(...sessions.map((item) => item.performanceScore));
+  const best = Math.abs(session.performanceScore - bestScore) < 0.05;
+  const settingsText = session.settings.length ? `настройка ${session.settings.join(", ")}` : "настройка не указана";
+  return `
+    <article class="session-summary rowing-session">
+      <div>
+        <strong>${formatDate(session.date)}${best ? " · лучший" : ""}</strong>
+        <span>${session.count} зап. · ${settingsText}</span>
+      </div>
+      <div>
+        <strong>${formatDistanceKm(session.distanceKm)} · ${formatDuration(session.durationSec)} · темп ${formatDuration(session.pace500Sec)}/500 м</strong>
+        <span>3000 м по темпу: ${formatDuration(session.projected3000Sec)} · Производительность: ${formatWeight(session.performanceScore)}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderRowingProgress(selected, tracked) {
+  const sessions = progressForExercise(selected.id);
+  const last = sessions.at(-1);
+  const previous = sessions.at(-2);
+  const delta = last && previous ? last.performanceScore - previous.performanceScore : null;
+  const chartSessions = sessions.filter((s) => Number.isFinite(Number(s.performanceScore)));
+  const chartConfig = rowingChartConfig(cardioProgressTab, chartSessions);
+  const chartId = `chart-${chartRefs.length}`;
+  if (chartSessions.length) {
+    chartRefs.push({
+      id: chartId,
+      values: chartConfig.values,
+      labels: chartSessions.map((s) => formatDate(s.date)),
+      type: chartConfig.type,
+      invert: chartConfig.invert,
+      neutral: chartConfig.neutral,
+      details: chartConfig.details,
+      yFormat: chartConfig.yFormat
+    });
+  }
+  return `
+    <section class="progress-hero rowing-hero">
+      <div>
+        <p class="eyebrow">Прогресс</p>
+        <h1>Гребля</h1>
+        <div class="progress-subline">
+          <span>${sessions.length} трен.</span>
+          <span>${setsForExercise(selected.id).length} зап.</span>
+          <span>Кардио</span>
+        </div>
+      </div>
+      <div class="progress-score ${deltaClass(delta)}">
+        <span>Производительность</span>
+        <strong>${last ? formatWeight(last.performanceScore) : "—"}</strong>
+        <small class="${deltaClass(delta)}">${performanceDeltaText(last, previous)}</small>
+      </div>
+    </section>
+    <section class="progress-picker-shell">
+      <div class="section-head"><h2>Выбор упражнения</h2><span class="legend-dot">${tracked.length} с историей</span></div>
+      <div class="progress-picker">
+        ${tracked.map(({ exercise, sessions: itemSessions }) => {
+          const itemLast = itemSessions.at(-1);
+          const itemPrev = itemSessions.at(-2);
+          const itemDelta = itemLast && itemPrev ? itemLast.score - itemPrev.score : null;
+          return `
+            <button class="${exercise.id === selected.id ? "active" : ""}" data-action="select-progress-card" data-id="${exercise.id}">
+              <span>${exercise.name}</span>
+              <strong>${itemLast ? formatWeight(itemLast.performanceScore || itemLast.score) : "—"}</strong>
+              <small>${itemDelta == null ? `${itemSessions.length} трен.` : trendText(itemLast.score, itemPrev.score)}</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+    <section class="progress-mosaic rowing-metrics">
+      <div class="metric-tile strength"><span>Дистанция</span><strong>${last ? formatDistanceKm(last.distanceKm) : "—"}</strong><p>за последнюю сессию</p></div>
+      <div class="metric-tile volume"><span>Время</span><strong>${last ? formatDuration(last.durationSec) : "—"}</strong><p>мин:сек работы</p></div>
+      <div class="metric-tile reserve"><span>Темп /500 м</span><strong>${last ? formatDuration(last.pace500Sec) : "—"}</strong><p>ниже = быстрее</p></div>
+      <div class="metric-tile stability"><span>3000 м</span><strong>${last ? formatDuration(last.projected3000Sec) : "—"}</strong><p>по текущему среднему темпу</p></div>
+    </section>
+    ${last ? `<section class="panel progress-note"><h2>Вывод</h2><p>${rowingInsight(last, previous, sessions)}</p><p class="muted">Производительность — условный индекс сессии: растёт, когда дистанция больше и/или средний темп быстрее. Используется только для сравнения своих тренировок между собой.</p></section>` : ""}
+    <section class="chart-panel primary-chart">
+      <div class="section-head"><h2>${chartConfig.title}</h2><span class="legend-dot">${chartConfig.subtitle}</span></div>
+      ${renderRowingChartTabs(cardioProgressTab)}
+      ${chartSessions.length ? `<canvas class="chart" id="${chartId}" height="250"></canvas><p class="muted">${cardioProgressTab === "pace" ? "Средний темп на 500 м. В гребле меньшее время означает более высокую скорость." : cardioProgressTab === "projected3000" ? "Если бы ты держал этот же темп 3000 м, получилось бы примерно такое время." : cardioProgressTab === "performance" ? "Условный индекс: больше = лучше. Учитывает дистанцию и среднюю скорость." : "Дистанция не окрашивается как хорошо или плохо: цели сессий могут отличаться."}</p>` : `<p class="muted">Нет данных.</p>`}
+    </section>
+    ${chartSessions.length <= 2 ? `<section class="panel trend-warning"><p>${rowingTrendWarning(chartSessions)}</p></section>` : ""}
+    <section class="panel">
+      <h2>Последние тренировки</h2>
+      ${sessions.length ? `<div class="session-list">${sessions.slice(-6).reverse().map(renderRowingSessionSummary).join("")}</div>` : `<p class="muted">Нет данных.</p>`}
+    </section>
+  `;
+}
+
 function renderProgress(selectedId) {
   const tracked = trackedExercises();
   const selected = tracked.find((item) => item.exercise.id === selectedId)?.exercise || tracked[0]?.exercise;
@@ -1187,6 +1393,7 @@ function renderProgress(selectedId) {
   const selectedIsCardio = isCardioExercise(selected);
   if (!selectedIsCardio) return renderStrengthProgress(selected, tracked);
   const selectedIsRowing = isRowingExercise(selected);
+  if (selectedIsRowing) return renderRowingProgress(selected, tracked);
   const sessions = progressForExercise(selected.id);
   const last = sessions.at(-1);
   const previous = sessions.at(-2);
@@ -1198,7 +1405,7 @@ function renderProgress(selectedId) {
     type: "line",
     pointValues: selectedIsCardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => selectedIsCardio
-      ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDuration(s.durationSec)}`
+      ? `${formatDate(s.date)} · ${formatWeight(s.score)} производительность · ${formatDuration(s.durationSec)}`
       : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс серии · пик ${formatWeight(s.pureE1rm)} кг 1ПМ · ${s.workCount} рабочих`)
   });
   const volumeChart = `chart-${chartRefs.length}`;
@@ -1220,7 +1427,7 @@ function renderProgress(selectedId) {
     invert: selectedIsRowing,
     details: sessions.map((s) => selectedIsCardio
       ? selectedIsRowing
-        ? `${formatDate(s.date)} · ave/500 м ${formatDuration(rowingSplit500(s))} · ${rowing3000Label(s)}`
+        ? `${formatDate(s.date)} · Темп /500 м ${formatDuration(rowingSplit500(s))} · ${rowing3000Label(s)}`
         : `${formatDate(s.date)} · ${formatWeight(s.speedKmh)} км/ч · темп ${formatPace(s.pace)}`
       : `${formatDate(s.date)} · запас ${formatWeight(s.avgReserve)} · ${s.workCount} рабочих`)
   });
@@ -1247,7 +1454,7 @@ function renderProgress(selectedId) {
         </div>
       </div>
       <div class="progress-score">
-        <span>Кардио индекс</span>
+        <span>Производительность</span>
         <strong>${last ? formatWeight(last.score) : "—"}</strong>
         <small>${last && previous ? trendText(last.score, previous.score) : "Нужна ещё одна точка"}</small>
       </div>
@@ -1272,14 +1479,14 @@ function renderProgress(selectedId) {
     <section class="progress-mosaic">
       <div class="metric-tile strength"><span>${selectedIsCardio ? "Дистанция" : "Пик силы"}</span><strong>${last ? selectedIsCardio ? formatDistanceKm(last.distanceKm) : `${formatWeight(last.pureE1rm)} кг` : "—"}</strong><p>${selectedIsCardio ? "за последнюю сессию" : "лучший чистый 1ПМ"}</p></div>
       <div class="metric-tile volume"><span>${selectedIsCardio ? "Время" : "Объём"}</span><strong>${last ? selectedIsCardio ? formatDuration(last.durationSec) : formatWeight(last.tonnage) : "—"}</strong><p>${selectedIsCardio ? "мин:сек работы" : "рабочие кг×повт"}</p></div>
-      <div class="metric-tile reserve"><span>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(rowingSplit500(last)) : `${formatWeight(last.speedKmh)} км/ч` : formatWeight(last.avgReserve) : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "средний split" : "средняя" : "средний RIR 0-10"}</p></div>
+      <div class="metric-tile reserve"><span>${selectedIsCardio ? selectedIsRowing ? "Темп /500 м" : "Скорость" : "Запас"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(rowingSplit500(last)) : `${formatWeight(last.speedKmh)} км/ч` : formatWeight(last.avgReserve) : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "ниже = быстрее" : "средняя" : "средний RIR 0-10"}</p></div>
       <div class="metric-tile stability"><span>${selectedIsCardio ? selectedIsRowing ? "3000 м" : "Темп" : "Серия"}</span><strong>${last ? selectedIsCardio ? selectedIsRowing ? formatDuration(row3000Equivalent(last)) : formatPace(last.pace) : last.fatigue != null ? formatWeight(last.fatigue) : "—" : "—"}</strong><p>${selectedIsCardio ? selectedIsRowing ? "эквивалент по темпу" : "мин/км" : "падение меньше = лучше"}</p></div>
     </section>
     ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous, selected)}</section>` : ""}
     <section class="chart-grid">
-      <div class="chart-panel primary-chart"><div class="section-head"><h2>Кардио индекс</h2><span class="legend-dot">дистанция + скорость</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории.</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel primary-chart"><div class="section-head"><h2>Производительность</h2><span class="legend-dot">дистанция + скорость</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">Условный индекс сессии: растёт, когда дистанция больше и/или средний темп быстрее. Используется только для сравнения своих тренировок между собой.</p>` : `<p class="muted">Нет данных.</p>`}</div>
       <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Дистанция" : "Объём"}</h2><span class="legend-dot">${selectedIsCardio ? "км" : "рабочие подходы"}</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Сколько километров набрано за сессию." : "Сколько работы сделано за день."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
-      <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? selectedIsRowing ? "ниже лучше" : "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? selectedIsRowing ? "Средний split на 500 м. Для гребли это обычно понятнее скорости." : "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? selectedIsRowing ? "Темп /500 м" : "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? selectedIsRowing ? "ниже = быстрее" : "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? selectedIsRowing ? "Средний темп на 500 м. В гребле меньшее время означает более высокую скорость." : "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       ${selectedIsCardio ? "" : `<div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>`}
     </section>
     <section class="panel">
@@ -1296,7 +1503,7 @@ function renderProgressNote(last, previous, exercise) {
     if (!previous) {
       return `
         <h2>Вывод</h2>
-        <p class="muted">${rowEquivalent ? `Первая точка по гребле: ave/500 м ${formatDuration(split500)}, ${rowing3000Label(last)}. ${rowNormsText()}` : "Есть первая кардио-точка. Следующая тренировка даст сравнение скорости, дистанции и времени."}</p>
+        <p class="muted">${rowEquivalent ? `Первая точка по гребле: Темп /500 м ${formatDuration(split500)}, ${rowing3000Label(last)}. ${rowNormsText()}` : "Есть первая кардио-точка. Следующая тренировка даст сравнение скорости, дистанции и времени."}</p>
       `;
     }
     const speedDelta = last.speedKmh - previous.speedKmh;
@@ -1305,7 +1512,7 @@ function renderProgressNote(last, previous, exercise) {
     return `
       <h2>Вывод</h2>
       <p>${speedDelta >= 0 ? "средняя скорость выше" : "средняя скорость ниже"}, ${distanceDelta >= 0 ? "дистанция выше" : "дистанция ниже"}, ${durationDelta >= 0 ? "времени больше" : "времени меньше"}.</p>
-      ${rowEquivalent ? `<p class="muted">Гребля: ave/500 м ${formatDuration(split500)}, ${rowing3000Label(last)}. ${rowNormsText()}</p>` : ""}
+      ${rowEquivalent ? `<p class="muted">Гребля: Темп /500 м ${formatDuration(split500)}, ${rowing3000Label(last)}. ${rowNormsText()}</p>` : ""}
       <div class="mini-metrics">
         <span>${trendText(last.speedKmh, previous.speedKmh, " км/ч")}</span>
         <span>${trendText(last.distanceKm, previous.distanceKm, " км")}</span>
@@ -1320,7 +1527,7 @@ function renderProgressNote(last, previous, exercise) {
   const volumeDelta = last.tonnage - previous.tonnage;
   const reserveDelta = last.avgReserve - previous.avgReserve;
   const parts = [
-    scoreDelta >= 0 ? "кардио индекс вырос" : "кардио индекс снизился",
+    scoreDelta >= 0 ? "производительность выросла" : "производительность снизилась",
     volumeDelta >= 0 ? "объём выше" : "объём ниже",
     reserveDelta >= 0 ? "запаса больше" : "запаса меньше"
   ];
@@ -1347,8 +1554,8 @@ function renderSessionSummary(session) {
           <span>${session.count} зап. · ${formatDuration(session.durationSec)}</span>
         </div>
         <div>
-          <strong>${formatDistanceKm(session.distanceKm)} · ${rowing ? `ave/500 м ${formatDuration(rowingSplit500(session))}` : `${formatWeight(session.speedKmh)} км/ч`}</strong>
-          <span>${rowing ? rowing3000Label(session) : `${formatWeight(session.score)} индекс · темп ${formatPace(session.pace)}`}</span>
+          <strong>${formatDistanceKm(session.distanceKm)} · ${rowing ? `Темп /500 м ${formatDuration(rowingSplit500(session))}` : `${formatWeight(session.speedKmh)} км/ч`}</strong>
+          <span>${rowing ? rowing3000Label(session) : `${formatWeight(session.score)} производительность · темп ${formatPace(session.pace)}`}</span>
         </div>
       </article>
     `;
@@ -1634,6 +1841,10 @@ function bindEvents(root) {
     progressChartTab = button.dataset.tab || "strength";
     render();
   }));
+  root.querySelectorAll("[data-action='cardio-progress-tab']").forEach((button) => button.addEventListener("click", () => {
+    cardioProgressTab = button.dataset.tab || "performance";
+    render();
+  }));
   root.querySelectorAll("[data-action='toggle-progress-warmup']").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.key;
     expandedProgressWarmups.has(key) ? expandedProgressWarmups.delete(key) : expandedProgressWarmups.add(key);
@@ -1904,7 +2115,7 @@ async function checkForUpdates() {
 
 function drawCharts() {
   chartRefs.forEach((chart) => {
-    const { id, values, labels, type, invert, pointValues, neutral } = chart;
+    const { id, values, labels, type, invert, pointValues, neutral, yFormat } = chart;
     const canvas = document.getElementById(id);
     if (!canvas || !values.length) return;
     const rect = canvas.getBoundingClientRect();
@@ -1915,7 +2126,7 @@ function drawCharts() {
     canvas.height = height * dpr;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
-    drawChart(ctx, width, height, values, labels, type, invert, pointValues, neutral);
+    drawChart(ctx, width, height, values, labels, type, invert, pointValues, neutral, yFormat);
     bindChartTooltip(canvas, chart);
   });
 }
@@ -1934,7 +2145,7 @@ function clampChartPoint(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null, neutral = false) {
+function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null, neutral = false, yFormat = formatWeight) {
   const { pad, chartW, chartH, max, min, range } = chartGeometry(width, height, values, type);
   ctx.clearRect(0, 0, width, height);
   ctx.font = "12px system-ui";
@@ -1946,7 +2157,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     ctx.moveTo(pad.l, y);
     ctx.lineTo(width - pad.r, y);
     ctx.stroke();
-    ctx.fillText(formatWeight(max - (range * i) / 4), 4, y + 4);
+    ctx.fillText(yFormat(max - (range * i) / 4), 4, y + 4);
   }
   const good = values.length < 2 || (invert ? values.at(-1) <= values.at(-2) : values.at(-1) >= values.at(-2));
   const color = neutral ? "#315d4f" : good ? "#1d775d" : "#c8543f";
