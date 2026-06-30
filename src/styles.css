@@ -708,6 +708,18 @@ h3 {
   line-height: 0.95;
 }
 
+.progress-score.good {
+  border-color: color-mix(in srgb, var(--primary) 44%, var(--line));
+}
+
+.progress-score.bad {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
+}
+
+.progress-score.bad strong {
+  color: color-mix(in srgb, var(--danger) 72%, var(--text));
+}
+
 .progress-picker-shell {
   position: relative;
   margin-top: 4px;
@@ -804,6 +816,58 @@ h3 {
     linear-gradient(180deg, rgb(255 255 255 / 0.94), rgb(255 255 255 / 0.82)),
     #fff;
   box-shadow: var(--shadow);
+}
+
+.progress-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.progress-tabs button {
+  min-height: 38px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.progress-tabs button.active {
+  border-color: var(--text);
+  color: #fff;
+  background: var(--text);
+}
+
+.strength-session {
+  align-items: start;
+}
+
+.set-compact-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-weight: 750;
+}
+
+.set-compact-list small {
+  display: block;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.warmup-list {
+  color: var(--muted);
+}
+
+.compact-toggle {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-height: 34px;
+  margin-top: 8px;
 }
 
 .primary-chart {

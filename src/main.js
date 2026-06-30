@@ -55,6 +55,8 @@ let serviceWorkerRegistration = null;
 let historyCursor = new Date();
 let activeHistoryDay = dayKey(Date.now());
 let expandedHistoryExercises = new Set();
+let progressChartTab = "strength";
+let expandedProgressWarmups = new Set();
 let chartTooltip = null;
 let toast = null;
 let toastTimer = null;
@@ -216,6 +218,21 @@ function shiftMonth(date, delta) {
 
 function e1rm(set) {
   return set.weight * (1 + set.reps / 30);
+}
+
+function estimatedE1rm(set) {
+  return set.weight * (1 + (set.reps + reserveValue(set)) / 30);
+}
+
+function validE1rmSet(set) {
+  return (
+    set?.type === "strength" &&
+    !set.warmup &&
+    Number(set.weight) > 0 &&
+    Number(set.reps) > 0 &&
+    reserveValue(set) >= 0 &&
+    set.reps + reserveValue(set) <= 15
+  );
 }
 
 function isCardioExercise(exercise) {
@@ -389,17 +406,23 @@ function sessionMetrics(items) {
     };
   }
   const work = items.filter((set) => !set.warmup);
-  const source = work.length ? work : items;
-  const top = work.length
-    ? work.reduce((best, set) => (adjustedScore(set) > adjustedScore(best || set) ? set : best), work[0])
+  const validWork = work.filter(validE1rmSet);
+  const excludedE1rm = work.filter((set) => !validE1rmSet(set));
+  const top = validWork.length
+    ? validWork.reduce((best, set) => (estimatedE1rm(set) > estimatedE1rm(best || set) ? set : best), validWork[0])
     : null;
-  const workScores = work.map(adjustedScore).sort((a, b) => b - a);
-  const stableScores = workScores.slice(0, Math.min(3, workScores.length));
   const tonnage = work.reduce((sum, set) => sum + set.weight * set.reps, 0);
-  const pureE1rm = work.length ? Math.max(...work.map(e1rm)) : 0;
-  const score = stableScores.length ? stableScores.reduce((sum, value) => sum + value, 0) / stableScores.length : 0;
-  const avgReserve = source.reduce((sum, set) => sum + reserveValue(set), 0) / Math.max(1, source.length);
-  const fatigue = work.length >= 2 ? Math.max(0, adjustedScore(work[0]) - adjustedScore(work[work.length - 1])) : null;
+  const maxWorkingWeight = work.length ? Math.max(...work.map((set) => Number(set.weight) || 0)) : 0;
+  const bestSessionE1RM = top ? estimatedE1rm(top) : 0;
+  const pureE1rm = bestSessionE1RM;
+  const score = bestSessionE1RM;
+  const avgReserve = work.reduce((sum, set) => sum + reserveValue(set), 0) / Math.max(1, work.length);
+  const hardSets = work.filter((set) => reserveValue(set) <= 3).length;
+  const lastValid = validWork.at(-1) || null;
+  const strengthRetention = validWork.length >= 2 && bestSessionE1RM > 0
+    ? estimatedE1rm(lastValid) / bestSessionE1RM * 100
+    : null;
+  const fatigue = strengthRetention == null ? null : 100 - strengthRetention;
   const start = items.at(0)?.createdAt || Date.now();
   const end = items.at(-1)?.createdAt || start;
   const minutes = Math.max(1, (end - start) / 60000);
@@ -414,9 +437,18 @@ function sessionMetrics(items) {
     top,
     tonnage,
     pureE1rm,
+    bestSessionE1RM,
+    maxWorkingWeight,
+    hardSets,
     score,
     avgReserve,
     fatigue,
+    strengthRetention,
+    validWorkCount: validWork.length,
+    excludedE1rmCount: excludedE1rm.length,
+    workingSets: work,
+    warmupSets: items.filter((set) => set.warmup),
+    excludedE1rm,
     density,
     firstWork,
     lastWork
@@ -442,30 +474,6 @@ function trackedExercises() {
     .map((exercise) => ({ exercise, sessions: progressForExercise(exercise.id), sets: setsForExercise(exercise.id) }))
     .filter((item) => item.sets.length > 0)
     .sort((a, b) => (b.sessions.at(-1)?.date || 0) - (a.sessions.at(-1)?.date || 0));
-}
-
-function overallProgressSeries() {
-  const byDay = new Map();
-  trackedExercises().forEach(({ exercise, sessions }) => {
-    const baseline = sessions.find((session) => session.score > 0)?.score || 0;
-    if (!baseline) return;
-    sessions.forEach((session) => {
-      const key = dayKey(session.date);
-      if (!byDay.has(key)) byDay.set(key, { date: session.date, normalized: [], volume: 0, exercises: new Set() });
-      const day = byDay.get(key);
-      day.normalized.push((session.score / baseline) * 100);
-      day.volume += session.tonnage;
-      day.exercises.add(exercise.id);
-    });
-  });
-  return [...byDay.values()]
-    .map((item) => ({
-      date: item.date,
-      score: item.normalized.reduce((sum, value) => sum + value, 0) / Math.max(1, item.normalized.length),
-      volume: item.volume,
-      exerciseCount: item.exercises.size
-    }))
-    .sort((a, b) => a.date - b.date);
 }
 
 function setsByDay() {
@@ -679,6 +687,7 @@ function renderExerciseCard(exercise) {
   const setCount = setsForExercise(exercise.id).length;
   const delta = last && prev ? last.score - prev.score : null;
   const deltaClass = delta == null ? "" : delta >= 0 ? "good" : "bad";
+  const cardio = isCardioExercise(exercise);
   return `
     <article class="exercise-card" data-open-exercise="${exercise.id}">
       <div class="exercise-icon">${iconHtml(exercise)}</div>
@@ -687,8 +696,8 @@ function renderExerciseCard(exercise) {
         <p>${label(equipment, exercise.equipmentType)} · ${sessions.length} трен. · ${setCount} подх.</p>
       </div>
       <div class="exercise-score ${deltaClass}">
-        <strong>${last ? formatWeight(last.score) : "—"}</strong>
-        <span>${delta == null ? "нет сравнения" : trendText(last.score, prev.score)}</span>
+        <strong>${last ? cardio ? formatWeight(last.score) : last.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—" : "—"}</strong>
+        <span>${cardio ? delta == null ? "нет сравнения" : trendText(last.score, prev.score) : e1rmDeltaText(last, prev)}</span>
       </div>
     </article>
   `;
@@ -940,7 +949,7 @@ function renderSetRow(set) {
   return `
     <div class="set-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}">
       <strong>${formatWeight(set.weight)} кг × ${set.reps}</strong>
-      <span>${set.warmup ? "Разминка" : "Рабочий"} · ${reserveName(reserveValue(set))} · ${formatDateTime(set.createdAt)}</span>
+      <span>${set.warmup ? "Разминка" : "Рабочий"} · ${reserveName(reserveValue(set))}${!set.warmup && !validE1rmSet(set) ? " · e1RM не считается: reps+RIR > 15" : ""} · ${formatDateTime(set.createdAt)}</span>
       <div class="set-actions">
         <button data-action="edit-set" data-id="${set.id}" aria-label="Редактировать подход">✎</button>
         <button data-action="delete-set" data-id="${set.id}" aria-label="Удалить подход">×</button>
@@ -976,9 +985,189 @@ function renderMiniProgress(exerciseId) {
     pointValues: cardio ? null : sessions.map((s) => s.avgReserve),
     details: sessions.map((s) => cardio
       ? `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatDistanceKm(s.distanceKm)}`
-      : `${formatDate(s.date)} · ${formatWeight(s.score)} индекс · ${formatWeight(s.avgReserve)} запас`)
+      : `${formatDate(s.date)} · e1RM ${s.bestSessionE1RM ? formatWeight(s.bestSessionE1RM) : "—"} кг · ${formatWeight(s.avgReserve)} RIR`)
   });
   return `<canvas class="chart" id="${id}" height="190"></canvas>`;
+}
+
+function e1rmDeltaText(last, previous) {
+  if (!last) return "Недостаточно данных";
+  if (!previous) return "первая тренировка";
+  if (!previous.bestSessionE1RM) return "нет корректного сравнения";
+  const delta = last.bestSessionE1RM - previous.bestSessionE1RM;
+  if (Math.abs(delta) < 0.05) return "без изменений к прошлой тренировке";
+  return `${delta > 0 ? "+" : "−"}${formatWeight(Math.abs(delta))} кг к прошлой тренировке`;
+}
+
+function strengthDeltaClass(last, previous) {
+  if (!last || !previous || !previous.bestSessionE1RM) return "";
+  const delta = last.bestSessionE1RM - previous.bestSessionE1RM;
+  if (Math.abs(delta) < 0.05) return "";
+  return delta > 0 ? "good" : "bad";
+}
+
+function strengthTrendWarning(sessions) {
+  if (sessions.length <= 1) return "Пока есть только одна тренировка. Тренд появится после следующей.";
+  if (sessions.length === 2) return "Тренд предварительный: всего 2 тренировки. Линия показывает только изменение между двумя точками, а не устойчивую тенденцию.";
+  return "Тренд считается по истории упражнения.";
+}
+
+function strengthInsight(last, previous, sessions) {
+  if (!previous) return "Есть первая точка. Следующая тренировка даст сравнение силы, тяжёлых подходов, тоннажа и запаса.";
+  const parts = [];
+  if (last.bestSessionE1RM && previous.bestSessionE1RM) {
+    const delta = last.bestSessionE1RM - previous.bestSessionE1RM;
+    if (delta > 0.05) parts.push(`Сила выросла: расчётный максимум +${formatWeight(delta)} кг.`);
+    else if (delta < -0.05) parts.push(`Расчётный максимум снизился на ${formatWeight(Math.abs(delta))} кг. Это может быть усталость, меньший запас или обычное колебание.`);
+    else parts.push("Расчётный максимум почти не изменился.");
+  } else {
+    parts.push("Для корректного сравнения силы пока не хватает валидных подходов.");
+  }
+  const hardDelta = last.hardSets - previous.hardSets;
+  if (hardDelta > 0) parts.push(`Качественный объём вырос: +${hardDelta} тяж. подх.`);
+  else if (hardDelta < 0) parts.push(`Тяжёлых подходов меньше: ${hardDelta} к прошлой тренировке.`);
+  const tonnageDelta = last.tonnage - previous.tonnage;
+  if (tonnageDelta > 0) parts.push(`Тоннаж вырос на ${formatWeight(tonnageDelta)} кг.`);
+  else if (tonnageDelta < 0) parts.push(`Тоннаж ниже на ${formatWeight(Math.abs(tonnageDelta))} кг.`);
+  const reserveDelta = last.avgReserve - previous.avgReserve;
+  if (reserveDelta < -0.05) parts.push(`Средний запас снизился до ${formatWeight(last.avgReserve)} RIR — работа стала ближе к отказу.`);
+  else if (reserveDelta > 0.05) parts.push(`Средний запас вырос до ${formatWeight(last.avgReserve)} RIR — тренировка была дальше от отказа.`);
+  if (sessions.length === 2) parts.push("Вывод предварительный: истории пока мало.");
+  return parts.join(" ");
+}
+
+function strengthChartConfig(tab, sessions) {
+  const configs = {
+    strength: {
+      title: "Расчётный максимум",
+      subtitle: "Лучший e1RM за тренировку.",
+      type: "line",
+      values: sessions.map((s) => s.bestSessionE1RM),
+      details: sessions.map((s) => `${formatDate(s.date)} · e1RM ${s.bestSessionE1RM ? formatWeight(s.bestSessionE1RM) : "—"} кг`)
+    },
+    hard: {
+      title: "Тяжёлые подходы",
+      subtitle: "Рабочие подходы с запасом 0–3 RIR.",
+      type: "bar",
+      values: sessions.map((s) => s.hardSets),
+      details: sessions.map((s) => `${formatDate(s.date)} · ${s.hardSets} тяж. подх.`)
+    },
+    tonnage: {
+      title: "Тоннаж",
+      subtitle: "Сумма вес × повторения без разминки.",
+      type: "bar",
+      values: sessions.map((s) => s.tonnage),
+      details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.tonnage)} кг`)
+    },
+    rir: {
+      title: "Средний запас",
+      subtitle: "Меньше = ближе к отказу. Само по себе снижение не является ухудшением.",
+      type: "line",
+      values: sessions.map((s) => s.avgReserve),
+      details: sessions.map((s) => `${formatDate(s.date)} · ${formatWeight(s.avgReserve)} RIR`)
+    }
+  };
+  return configs[tab] || configs.strength;
+}
+
+function renderStrengthChartTabs(active) {
+  const tabs = [
+    ["strength", "Сила"],
+    ["hard", "Тяжёлые подходы"],
+    ["tonnage", "Тоннаж"],
+    ["rir", "Запас"]
+  ];
+  return `<div class="progress-tabs">${tabs.map(([key, title]) => `<button class="${active === key ? "active" : ""}" data-action="progress-tab" data-tab="${key}">${title}</button>`).join("")}</div>`;
+}
+
+function renderStrengthSessionSummary(session) {
+  const key = `${session.date}:${session.top?.exerciseId || ""}`;
+  const warmupsOpen = expandedProgressWarmups.has(key);
+  const workList = session.workingSets.map((set) => {
+    const excluded = !validE1rmSet(set);
+    return `<li>${formatWeight(set.weight)} × ${set.reps} @RIR ${reserveValue(set)}${excluded ? ` <small>e1RM не считается: reps+RIR &gt; 15</small>` : ""}</li>`;
+  }).join("");
+  const warmups = session.warmupSets.map((set) => `<li>${formatWeight(set.weight)} × ${set.reps} @RIR ${reserveValue(set)}</li>`).join("");
+  return `
+    <article class="session-summary strength-session">
+      <div>
+        <strong>${formatDate(session.date)}</strong>
+        <span>e1RM: ${session.bestSessionE1RM ? `${formatWeight(session.bestSessionE1RM)} кг` : "—"} · тяжёлые: ${session.hardSets} · тоннаж: ${formatWeight(session.tonnage)} кг · запас: ${formatWeight(session.avgReserve)} RIR</span>
+      </div>
+      <ul class="set-compact-list">${workList || "<li>Рабочих подходов нет.</li>"}</ul>
+      ${session.warmupSets.length ? `<button class="ghost compact-toggle" data-action="toggle-progress-warmup" data-key="${key}">${warmupsOpen ? "Скрыть разминку" : "Показать разминку"}</button>` : ""}
+      ${warmupsOpen ? `<ul class="set-compact-list warmup-list">${warmups}</ul>` : ""}
+    </article>
+  `;
+}
+
+function renderStrengthProgress(selected, tracked) {
+  const sessions = progressForExercise(selected.id);
+  const last = sessions.at(-1);
+  const previous = sessions.at(-2);
+  const chartSessions = sessions.filter((s) => progressChartTab !== "strength" || s.bestSessionE1RM > 0);
+  const chartConfig = strengthChartConfig(progressChartTab, chartSessions);
+  const chartId = `chart-${chartRefs.length}`;
+  if (chartSessions.length) {
+    chartRefs.push({
+      id: chartId,
+      values: chartConfig.values,
+      labels: chartSessions.map((s) => formatDate(s.date)),
+      type: chartConfig.type,
+      neutral: progressChartTab !== "strength",
+      details: chartConfig.details
+    });
+  }
+  return `
+    <section class="progress-hero">
+      <div>
+        <p class="eyebrow">Прогресс</p>
+        <h1>${selected.name}</h1>
+        <div class="progress-subline">
+          <span>${sessions.length} трен.</span>
+          <span>${setsForExercise(selected.id).length} подх.</span>
+          <span>${label(equipment, selected.equipmentType)}</span>
+        </div>
+      </div>
+      <div class="progress-score ${strengthDeltaClass(last, previous)}">
+        <span>Расчётный максимум</span>
+        <strong>${last?.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—"}</strong>
+        <small>${e1rmDeltaText(last, previous)}</small>
+      </div>
+    </section>
+    <section class="progress-picker-shell">
+      <div class="section-head"><h2>Выбор упражнения</h2><span class="legend-dot">${tracked.length} с историей</span></div>
+      <div class="progress-picker">
+        ${tracked.map(({ exercise, sessions: itemSessions }) => {
+          const itemLast = itemSessions.at(-1);
+          const itemPrev = itemSessions.at(-2);
+          return `
+            <button class="${exercise.id === selected.id ? "active" : ""}" data-action="select-progress-card" data-id="${exercise.id}">
+              <span>${exercise.name}</span>
+              <strong>${itemLast ? isCardioExercise(exercise) ? formatWeight(itemLast.score) : itemLast.bestSessionE1RM ? `${formatWeight(itemLast.bestSessionE1RM)} кг` : "—" : "—"}</strong>
+              <small>${isCardioExercise(exercise) ? itemLast && itemPrev ? trendText(itemLast.score, itemPrev.score) : `${itemSessions.length} трен.` : e1rmDeltaText(itemLast, itemPrev)}</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+    <section class="progress-mosaic">
+      <div class="metric-tile strength"><span>Макс. вес</span><strong>${last ? `${formatWeight(last.maxWorkingWeight)} кг` : "—"}</strong><p>Среди рабочих подходов.</p></div>
+      <div class="metric-tile volume"><span>Тяжёлые подходы</span><strong>${last ? last.hardSets : "—"}</strong><p>Рабочие подходы с запасом 0–3.</p></div>
+      <div class="metric-tile reserve"><span>Средний запас</span><strong>${last ? `${formatWeight(last.avgReserve)} RIR` : "—"}</strong><p>Меньше = ближе к отказу.</p></div>
+      <div class="metric-tile stability"><span>Тоннаж</span><strong>${last ? `${formatWeight(last.tonnage)} кг` : "—"}</strong><p>Без разминки.</p></div>
+    </section>
+    ${last ? `<section class="panel progress-note"><h2>Вывод</h2><p>${strengthInsight(last, previous, sessions)}</p>${last.strengthRetention != null ? `<p class="muted">Сохранение силы: ${formatWeight(last.strengthRetention)}%. Показывает, насколько последний рабочий подход сохранил силу относительно лучшего подхода сессии.</p>` : `<p class="muted">Недостаточно рабочих подходов для оценки сохранения силы.</p>`}</section>` : ""}
+    <section class="chart-panel primary-chart">
+      <div class="section-head"><h2>${chartConfig.title}</h2><span class="legend-dot">${chartConfig.subtitle}</span></div>
+      ${renderStrengthChartTabs(progressChartTab)}
+      ${chartSessions.length > 1 ? `<canvas class="chart" id="${chartId}" height="250"></canvas><p class="muted">${strengthTrendWarning(sessions)}</p>` : `<p class="muted">${strengthTrendWarning(sessions)}</p>`}
+    </section>
+    <section class="panel">
+      <h2>Последние тренировки</h2>
+      ${sessions.length ? `<div class="session-list">${sessions.slice(-6).reverse().map(renderStrengthSessionSummary).join("")}</div>` : `<p class="muted">Нет данных.</p>`}
+    </section>
+  `;
 }
 
 function renderProgress(selectedId) {
@@ -996,9 +1185,9 @@ function renderProgress(selectedId) {
     `;
   }
   const selectedIsCardio = isCardioExercise(selected);
+  if (!selectedIsCardio) return renderStrengthProgress(selected, tracked);
   const selectedIsRowing = isRowingExercise(selected);
   const sessions = progressForExercise(selected.id);
-  const overall = overallProgressSeries();
   const last = sessions.at(-1);
   const previous = sessions.at(-2);
   const scoreChart = `chart-${chartRefs.length}`;
@@ -1046,14 +1235,6 @@ function renderProgress(selectedId) {
     invert: true,
     details: fatigueSessions.map((s) => `${formatDate(s.date)} · падение ${formatWeight(s.fatigue)} · меньше лучше`)
   });
-  const overallChart = `chart-${chartRefs.length}`;
-  chartRefs.push({
-    id: overallChart,
-    values: overall.map((item) => item.score),
-    labels: overall.map((item) => formatDate(item.date)),
-    type: "line",
-    details: overall.map((item) => `${formatDate(item.date)} · ${formatWeight(item.score)} общий индекс · ${item.exerciseCount} упр.`)
-  });
   return `
     <section class="progress-hero">
       <div>
@@ -1066,7 +1247,7 @@ function renderProgress(selectedId) {
         </div>
       </div>
       <div class="progress-score">
-        <span>Индекс формы</span>
+        <span>Кардио индекс</span>
         <strong>${last ? formatWeight(last.score) : "—"}</strong>
         <small>${last && previous ? trendText(last.score, previous.score) : "Нужна ещё одна точка"}</small>
       </div>
@@ -1096,7 +1277,7 @@ function renderProgress(selectedId) {
     </section>
     ${last ? `<section class="panel progress-note">${renderProgressNote(last, previous, selected)}</section>` : ""}
     <section class="chart-grid">
-      <div class="chart-panel primary-chart"><div class="section-head"><h2>${selectedIsCardio ? "Кардио индекс" : "Форма"}</h2><span class="legend-dot">${selectedIsCardio ? "дистанция + скорость" : "лучшие рабочие"}</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">${selectedIsCardio ? "Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории." : "Главная линия: среднее из лучших рабочих подходов с поправкой на запас. Разминка не раздувает показатель."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
+      <div class="chart-panel primary-chart"><div class="section-head"><h2>Кардио индекс</h2><span class="legend-dot">дистанция + скорость</span></div>${sessions.length ? `<canvas class="chart" id="${scoreChart}" height="250"></canvas><p class="muted">Индекс растёт от большей дистанции и скорости. Настройка тренажёра только сохраняется в истории.</p>` : `<p class="muted">Нет данных.</p>`}</div>
       <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? "Дистанция" : "Объём"}</h2><span class="legend-dot">${selectedIsCardio ? "км" : "рабочие подходы"}</span></div>${sessions.length ? `<canvas class="chart" id="${volumeChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? "Сколько километров набрано за сессию." : "Сколько работы сделано за день."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       <div class="chart-panel"><div class="section-head"><h2>${selectedIsCardio ? selectedIsRowing ? "ave/500 м" : "Скорость" : "Запас"}</h2><span class="legend-dot">${selectedIsCardio ? selectedIsRowing ? "ниже лучше" : "км/ч" : "0 отказ · 10 легко"}</span></div>${sessions.length ? `<canvas class="chart" id="${reserveChart}" height="210"></canvas><p class="muted">${selectedIsCardio ? selectedIsRowing ? "Средний split на 500 м. Для гребли это обычно понятнее скорости." : "Средняя скорость по времени и дистанции." : "Та же работа с большим запасом = прогресс."}</p>` : `<p class="muted">Нет данных.</p>`}</div>
       ${selectedIsCardio ? "" : `<div class="chart-panel"><div class="section-head"><h2>Устойчивость</h2><span class="legend-dot">ниже лучше</span></div>${fatigueValues.length ? `<canvas class="chart" id="${fatigueChart}" height="210"></canvas><p class="muted">Насколько проседает серия от первого рабочего подхода к последнему.</p>` : `<p class="muted">Нужны хотя бы два рабочих подхода в тренировке.</p>`}</div>`}
@@ -1104,10 +1285,6 @@ function renderProgress(selectedId) {
     <section class="panel">
       <h2>Последние тренировки</h2>
       ${sessions.length ? `<div class="session-list">${sessions.slice(-6).reverse().map(renderSessionSummary).join("")}</div>` : `<p class="muted">Нет данных.</p>`}
-    </section>
-    <section class="chart-panel overall-panel">
-      <div class="section-head"><h2>Общий тренд</h2><span class="legend-dot">100 = первая тренировка каждого упражнения</span></div>
-      ${overall.length ? `<canvas class="chart" id="${overallChart}" height="230"></canvas><p class="muted">Упражнения нормализуются отдельно, поэтому жим, тяги и ноги можно свести в один общий индекс без смешивания килограммов.</p>` : `<p class="muted">Появится после первых тренировок.</p>`}
     </section>
   `;
 }
@@ -1143,7 +1320,7 @@ function renderProgressNote(last, previous, exercise) {
   const volumeDelta = last.tonnage - previous.tonnage;
   const reserveDelta = last.avgReserve - previous.avgReserve;
   const parts = [
-    scoreDelta >= 0 ? "индекс формы вырос" : "индекс формы снизился",
+    scoreDelta >= 0 ? "кардио индекс вырос" : "кардио индекс снизился",
     volumeDelta >= 0 ? "объём выше" : "объём ниже",
     reserveDelta >= 0 ? "запаса больше" : "запаса меньше"
   ];
@@ -1453,6 +1630,15 @@ function bindEvents(root) {
   });
   root.querySelectorAll("[data-action='progress-exercise']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress", id: button.dataset.id })));
   root.querySelectorAll("[data-action='select-progress-card']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress", id: button.dataset.id })));
+  root.querySelectorAll("[data-action='progress-tab']").forEach((button) => button.addEventListener("click", () => {
+    progressChartTab = button.dataset.tab || "strength";
+    render();
+  }));
+  root.querySelectorAll("[data-action='toggle-progress-warmup']").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.key;
+    expandedProgressWarmups.has(key) ? expandedProgressWarmups.delete(key) : expandedProgressWarmups.add(key);
+    render();
+  }));
   root.querySelector("[data-action='edit-exercise']")?.addEventListener("click", (event) => openEditDialog(event.currentTarget.dataset.id));
   root.querySelector("[data-action='close-exercise-editor']")?.addEventListener("click", () => {
     editingExerciseId = null;
@@ -1718,7 +1904,7 @@ async function checkForUpdates() {
 
 function drawCharts() {
   chartRefs.forEach((chart) => {
-    const { id, values, labels, type, invert, pointValues } = chart;
+    const { id, values, labels, type, invert, pointValues, neutral } = chart;
     const canvas = document.getElementById(id);
     if (!canvas || !values.length) return;
     const rect = canvas.getBoundingClientRect();
@@ -1729,7 +1915,7 @@ function drawCharts() {
     canvas.height = height * dpr;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
-    drawChart(ctx, width, height, values, labels, type, invert, pointValues);
+    drawChart(ctx, width, height, values, labels, type, invert, pointValues, neutral);
     bindChartTooltip(canvas, chart);
   });
 }
@@ -1748,7 +1934,7 @@ function clampChartPoint(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null) {
+function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null, neutral = false) {
   const { pad, chartW, chartH, max, min, range } = chartGeometry(width, height, values, type);
   ctx.clearRect(0, 0, width, height);
   ctx.font = "12px system-ui";
@@ -1763,7 +1949,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     ctx.fillText(formatWeight(max - (range * i) / 4), 4, y + 4);
   }
   const good = values.length < 2 || (invert ? values.at(-1) <= values.at(-2) : values.at(-1) >= values.at(-2));
-  const color = good ? "#1d775d" : "#c8543f";
+  const color = neutral ? "#315d4f" : good ? "#1d775d" : "#c8543f";
   if (type === "bar") {
     const slot = chartW / values.length;
     values.forEach((value, index) => {
@@ -1771,7 +1957,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
       const x = pad.l + slot * index + slot * 0.18;
       const y = pad.t + chartH - barH;
       const radius = 7;
-      ctx.fillStyle = index === values.length - 1 ? "#d99a32" : "#315d4f";
+      ctx.fillStyle = neutral ? "#315d4f" : index === values.length - 1 ? "#d99a32" : "#315d4f";
       roundRect(ctx, x, y, slot * 0.64, barH, radius);
       ctx.fill();
     });
