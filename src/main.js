@@ -253,7 +253,7 @@ const estonianPhrases = [
   ["Установка", "Paigaldamine"],
   ["Обновления", "Uuendused"],
   ["Оффлайн", "Võrguühenduseta"],
-  ["Ещё", "Veel"],
+  ["Настр.", "Seaded"],
   ["Упр.", "Harj."],
   ["Клавиатура", "Klaviatuur"],
   ["Скрыть клавиатуру", "Peida klaviatuur"],
@@ -1187,7 +1187,7 @@ function render() {
         <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упр.</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
         <button class="${route.name === "history" ? "active" : ""}" data-action="history">История</button>
-        <button class="${route.name === "settings" ? "active" : ""}" data-action="settings">Ещё</button>
+        <button class="${route.name === "settings" ? "active" : ""}" data-action="settings">Настр.</button>
       </nav>
     </div>
   `;

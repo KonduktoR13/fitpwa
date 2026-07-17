@@ -20,10 +20,13 @@
 
 html {
   background: var(--bg);
+  overflow-x: clip;
 }
 
 body {
+  max-width: 100%;
   margin: 0;
+  overflow-x: clip;
   color: var(--text);
   background:
     linear-gradient(135deg, rgb(29 119 93 / 0.08), transparent 32rem),
@@ -703,8 +706,18 @@ h3 {
   color: var(--muted);
 }
 
+.switch {
+  position: relative;
+  width: 48px;
+  overflow: hidden;
+}
+
 .switch input {
   position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
   opacity: 0;
 }
 
