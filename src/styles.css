@@ -1452,8 +1452,8 @@ h3 {
 
   .metrics-row > div:last-child {
     grid-column: 1 / -1;
-    grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
   }
 
   .metrics-row > div:last-child strong {

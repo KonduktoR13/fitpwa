@@ -288,6 +288,14 @@ const estonianPhrases = [
   ["Найти упражнение", "Otsi harjutust"],
   ["темп последней", "viimase treeningu tempo"],
   ["Расч. максимум", "Arvestuslik maksimum"],
+  ["Расч. максимум: последние 2 тренировки", "Arvestuslik maksimum: 2 viimast treeningut"],
+  ["Индекс: последние 2 тренировки", "Indeks: 2 viimast treeningut"],
+  ["Для сравнения нужны 2 тренировки", "Võrdlemiseks on vaja 2 treeningut"],
+  ["Пока записана 1 тренировка", "Praegu on salvestatud 1 treening"],
+  ["Истории пока нет", "Ajalugu veel puudub"],
+  ["Сравнение появится после следующей тренировки", "Võrdlus ilmub pärast järgmist treeningut"],
+  ["Сравнение появится после второй тренировки", "Võrdlus ilmub pärast teist treeningut"],
+  ["разница", "erinevus"],
   ["3000 м тест", "3000 m test"],
   ["Заслонка 9", "Siibri asend 9"],
   ["В прошлой тренировке было только", "Eelmisel treeningul oli ainult"],
@@ -1261,6 +1269,23 @@ function renderExercise(exerciseId) {
   const e1rmDelta = !isCardio && last && previous && last.bestSessionE1RM && previous.bestSessionE1RM
     ? last.bestSessionE1RM - previous.bestSessionE1RM
     : null;
+  const cardioDelta = isCardio && last && previous ? last.score - previous.score : null;
+  const hasRecentComparison = isCardio ? cardioDelta != null : e1rmDelta != null;
+  const recentComparison = hasRecentComparison
+    ? {
+        label: isCardio ? "Индекс: последние 2 тренировки" : "Расч. максимум: последние 2 тренировки",
+        value: isCardio
+          ? `${formatDate(previous.date)} ${formatWeight(previous.score)} → ${formatDate(last.date)} ${formatWeight(last.score)} (${cardioDelta >= 0 ? "+" : "−"}${formatWeight(Math.abs(cardioDelta))})`
+          : `${formatDate(previous.date)} ${formatWeight(previous.bestSessionE1RM)} кг → ${formatDate(last.date)} ${formatWeight(last.bestSessionE1RM)} кг (${e1rmDelta >= 0 ? "+" : "−"}${formatWeight(Math.abs(e1rmDelta))} кг)`,
+        delta: isCardio ? cardioDelta : e1rmDelta
+      }
+    : last
+      ? {
+          label: "Пока записана 1 тренировка",
+          value: `${formatDate(last.date)} ${isCardio ? formatWeight(last.score) : `${formatWeight(last.bestSessionE1RM)} кг`} · Сравнение появится после следующей тренировки`,
+          delta: null
+        }
+      : { label: "Истории пока нет", value: "Сравнение появится после второй тренировки", delta: null };
   const formValues = editingSet
     ? {
         weight: String(editingSet.weight),
@@ -1281,7 +1306,7 @@ function renderExercise(exerciseId) {
     <section class="metrics-row">
       <div><span>Сегодня</span><strong>${isCardio ? todaySets.length : todayWorkSets.length ? `${todayWorkSets.length} раб.` : "0"}</strong></div>
       <div><span>${isCardio ? "Всего сегодня" : "Расч. максимум"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + cardioDurationSec(set), 0)) : last?.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—"}</strong></div>
-      <div class="${e1rmDelta == null ? "" : e1rmDelta >= 0 ? "good" : "bad"}"><span>Динамика</span><strong>${isCardio ? last && previous ? trendText(last.score, previous.score) : "—" : e1rmDelta == null ? "—" : e1rmDeltaText(last, previous)}</strong></div>
+      <div class="${recentComparison.delta == null ? "" : recentComparison.delta >= 0 ? "good" : "bad"}"><span>${recentComparison.label}</span><strong>${recentComparison.value}</strong></div>
     </section>
     ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, allSets, previous)}
     <section class="panel">
@@ -1306,7 +1331,7 @@ function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous
       ${keypadOpen ? renderKeypad() : ""}
       <label class="effort-label"><span>Запас повторов: <strong id="reserveText">${reserveName(formValues.reserve)}</strong></span><input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" /></label>
       <div class="rir-chips">
-        ${[0, 1, 2, 3, 5, 10].map((value) => `<button type="button" data-action="set-reserve-only" data-reserve="${value}" class="${Number(formValues.reserve) === value ? "active" : ""}">${value === 0 ? "0 отказ" : value}</button>`).join("")}
+        ${Array.from({ length: 11 }, (_, value) => `<button type="button" data-action="set-reserve-only" data-reserve="${value}" aria-pressed="${Number(formValues.reserve) === value}" class="${Number(formValues.reserve) === value ? "active" : ""}">${value === 0 ? "0 отказ" : value}</button>`).join("")}
       </div>
       <label class="warmup-toggle"><input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} /> <span>Разминка</span></label>
       <p class="muted warmup-note">${formValues.warmup ? "Разминка не влияет на прогресс." : "Рабочий подход влияет на прогресс."}</p>
@@ -1412,6 +1437,20 @@ function updateStrengthComparison(root) {
   localizeUi(form);
 }
 
+function syncReserveUi(root, reserve) {
+  const value = Number(reserve);
+  const form = root.querySelector("[data-form='set'][data-kind='strength']");
+  if (!form) return;
+  if (form.elements.reserve) form.elements.reserve.value = value;
+  root.querySelectorAll(".rir-chips [data-reserve]").forEach((button) => {
+    const active = Number(button.dataset.reserve) === value;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const reserveText = root.querySelector("#reserveText");
+  if (reserveText) reserveText.textContent = localizeText(reserveName(value));
+}
+
 function finishSetEditing() {
   const returnRoute = editingReturnRoute;
   editingSetId = null;
@@ -1446,7 +1485,7 @@ function applySuggestedStrengthValues(root) {
   }
   strengthDraftDirty = false;
   pendingSuggestionType = null;
-  root.querySelector("#reserveText").textContent = localizeText(reserveName(suggestion.reserve));
+  syncReserveUi(root, suggestion.reserve);
   updateStrengthComparison(root);
 }
 
@@ -2361,7 +2400,7 @@ function bindEvents(root) {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
     strengthDraftDirty = true;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = localizeText(reserveName(Number(event.target.value)));
+    syncReserveUi(root, Number(event.target.value));
     event.target.style.setProperty("--thumb-color", reserveColor(Number(event.target.value)));
     updateStrengthComparison(root);
   });
@@ -2443,7 +2482,7 @@ function bindEvents(root) {
       draftSet.reserve = reserve;
       draftSet.warmup = reserve >= 6;
     }
-    root.querySelector("#reserveText").textContent = localizeText(reserveName(reserve));
+    syncReserveUi(root, reserve);
     applySuggestedStrengthValues(root);
     updateStrengthComparison(root);
   }));
@@ -2455,7 +2494,7 @@ function bindEvents(root) {
     if (!editingSetId) draftSet.reserve = reserve;
     strengthDraftDirty = true;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = localizeText(reserveName(reserve));
+    syncReserveUi(root, reserve);
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
@@ -2494,7 +2533,7 @@ function bindEvents(root) {
     draftSet = { ...draftSet, weight: button.dataset.weight, reps: button.dataset.reps, reserve: Number(button.dataset.reserve), warmup: form.elements.warmup?.checked || false };
     strengthDraftDirty = false;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = localizeText(reserveName(draftSet.reserve));
+    syncReserveUi(root, draftSet.reserve);
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='use-set']").forEach((row) => row.addEventListener("click", () => {
@@ -2508,7 +2547,7 @@ function bindEvents(root) {
     draftSet = { weight: String(set.weight), reps: String(set.reps), reserve: reserveValue(set), warmup: Boolean(set.warmup) };
     strengthDraftDirty = false;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = localizeText(reserveName(draftSet.reserve));
+    syncReserveUi(root, draftSet.reserve);
     updateStrengthComparison(root);
   }));
   root.querySelector("[data-action='apply-suggestion']")?.addEventListener("click", (event) => {
