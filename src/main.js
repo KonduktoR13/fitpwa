@@ -1,7 +1,397 @@
 import "./styles.css";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
+const LANGUAGE_KEY = "training-log-pwa-language";
 const DATA_VERSION = 5;
+let currentLanguage = localStorage.getItem(LANGUAGE_KEY) === "ru" ? "ru" : "et";
+
+// The application predates i18n and its Russian copy is embedded in the render
+// functions. Keeping this ordered phrase table in one place lets every screen,
+// chart tooltip, validation message and PWA prompt use the same Estonian copy
+// without changing the shape of saved workout data.
+const estonianPhrases = [
+  ["Силовой журнал", "Treeningpäevik"],
+  ["локально на устройстве", "andmed ainult selles seadmes"],
+  ["На главную", "Avalehele"],
+  ["Ручной режим", "Käsitsi sisestamine"],
+  ["Здесь появится динамика после первых подходов", "Areng kuvatakse pärast esimesi seeriaid"],
+  ["Сегодня по этому упражнению ещё нет подходов.", "Täna pole selle harjutuse juures veel seeriaid."],
+  ["Пока есть только одна тренировка. Тренд появится после следующей.", "Praegu on ainult üks treening. Trend ilmub pärast järgmist."],
+  ["Пока есть только одна тренировка. Сравнение появится после следующей.", "Praegu on ainult üks treening. Võrdlus ilmub pärast järgmist."],
+  ["Тренд предварительный: всего 2 тренировки. Линия показывает только изменение между двумя точками, а не устойчивую тенденцию.", "Trend on esialgne: treeninguid on ainult kaks. Joon näitab kahe punkti vahelist muutust, mitte püsivat suundumust."],
+  ["Производительность — условный индекс сессии: растёт, когда дистанция больше и/или средний темп быстрее. Используется только для сравнения своих тренировок между собой.", "Sooritus on treeningu võrdlusindeks: see kasvab pikema distantsi ja/või kiirema keskmise tempo korral. Indeks on mõeldud ainult enda treeningute võrdlemiseks."],
+  ["Условный индекс сессии: растёт, когда дистанция больше и/или средний темп быстрее. Используется только для сравнения своих тренировок между собой.", "Treeningu võrdlusindeks kasvab pikema distantsi ja/või kiirema keskmise tempo korral. Seda kasutatakse ainult enda treeningute võrdlemiseks."],
+  ["Средний темп на 500 м. В гребле меньшее время означает более высокую скорость.", "Keskmine tempo 500 m kohta. Sõudmises tähendab lühem aeg suuremat kiirust."],
+  ["Если бы ты держал этот же темп 3000 м, получилось бы примерно такое время.", "Kui hoiaksid sama tempot 3000 m, oleks tulemus ligikaudu selline."],
+  ["Дистанция не окрашивается как хорошо или плохо: цели сессий могут отличаться.", "Distantsi ei hinnata heaks ega halvaks, sest treeningute eesmärgid võivad erineda."],
+  ["Сохранение силы:", "Jõu säilimine:"],
+  ["Показывает, насколько последний рабочий подход сохранил силу относительно лучшего подхода сессии.", "Näitab, kui hästi säilis viimases tööseerias jõud võrreldes treeningu parima seeriaga."],
+  ["Недостаточно рабочих подходов для оценки сохранения силы.", "Jõu säilimise hindamiseks pole piisavalt tööseeriaid."],
+  ["Меньше = ближе к отказу. Само по себе снижение не является ухудшением.", "Väiksem = suutlikkuse piirile lähemal. Vähenemine ei tähenda iseenesest halvenemist."],
+  ["Рабочие подходы с запасом 0–3 RIR.", "Tööseeriad varuga 0–3 RIR."],
+  ["Сумма вес × повторения без разминки.", "Raskuse ja korduste summa ilma soojendusseeriateta."],
+  ["Настройка тренажёра сохраняется только в истории и не участвует в расчёте прогресса.", "Seadme seadistus talletatakse ainult ajalukku ega mõjuta arengu arvutust."],
+  ["Настройка сохраняется как контекст. Она не считается сложностью и не влияет на прогресс.", "Seadistus salvestatakse lisateabena. Seda ei käsitleta raskusena ja see ei mõjuta arengut."],
+  ["Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.", "Siin on olulised aeg, distants ja ühtlane soojendusharjumus, koormust eraldi hindamata."],
+  ["3000 м - быстрый пресет для рабочего фит-теста, обычные тренировки можно писать с любой дистанцией.", "3000 m on fitness-testi kiirvalik; tavatreeningu võib salvestada mis tahes distantsiga."],
+  ["Нормы из Android: муж. 18-29 13:30, 30-39 14:00, 40-49 14:30, 50+ 15:00; жен. 15:00.", "Androidi normid: mehed 18–29 13:30, 30–39 14:00, 40–49 14:30, 50+ 15:00; naised 15:00."],
+  ["Экспорт сохраняет упражнения, подходы, картинки и настройки в один JSON-файл.", "Eksport salvestab harjutused, seeriad, pildid ja seaded ühte JSON-faili."],
+  ["Кнопка установки появляется, когда браузер разрешает установку.", "Paigaldusnupp ilmub siis, kui brauser lubab rakenduse paigaldada."],
+  ["Приложение проверяет новый service worker при запуске и раз в минуту.", "Rakendus kontrollib uut service worker'it käivitamisel ja kord minutis."],
+  ["Последняя загруженная версия открывается без сети, данные остаются на устройстве.", "Viimati laaditud versioon töötab võrguühenduseta ja andmed jäävad seadmesse."],
+  ["У упражнения есть история. Удалить упражнение и все его подходы?", "Harjutusel on ajalugu. Kas kustutada harjutus ja kõik selle seeriad?"],
+  ["Заменить текущие локальные данные импортированным файлом?", "Kas asendada praegused kohalikud andmed imporditud faili andmetega?"],
+  ["Service worker ещё не зарегистрирован.", "Service worker pole veel registreeritud."],
+  ["Новая версия пока не найдена.", "Uut versiooni ei leitud."],
+  ["Не удалось прочитать JSON-файл.", "JSON-faili lugemine ebaõnnestus."],
+  ["Доступна новая версия", "Uus versioon on saadaval"],
+  ["Миграции применяются автоматически", "Andmeuuendused rakenduvad automaatselt"],
+  ["Дни с записанными подходами", "Salvestatud seeriatega päevad"],
+  ["Все записи хранятся локально", "Kõik kirjed talletatakse kohalikult"],
+  ["Примерно в памяти браузера", "Ligikaudne maht brauseri mälus"],
+  ["Разминка не влияет на прогресс.", "Soojendus ei mõjuta arengut."],
+  ["Рабочий подход влияет на прогресс.", "Tööseeria mõjutab arengut."],
+  ["Не влияет на прогресс", "Ei mõjuta arengut"],
+  ["Нужны хотя бы два рабочих подхода в тренировке.", "Treeningus peab olema vähemalt kaks tööseeriat."],
+  ["Насколько проседает серия от первого рабочего подхода к последнему.", "Kui palju langeb tulemus esimesest tööseeriast viimaseni."],
+  ["Сколько километров набрано за сессию.", "Treeningu jooksul läbitud kilomeetrid."],
+  ["Сколько работы сделано за день.", "Päeva jooksul tehtud töö maht."],
+  ["Средняя скорость по времени и дистанции.", "Keskmine kiirus aja ja distantsi põhjal."],
+  ["Та же работа с большим запасом = прогресс.", "Sama töö suurema varuga tähendab arengut."],
+  ["Есть первая кардио-точка. Следующая тренировка даст сравнение скорости, дистанции и времени.", "Esimene kardiotreening on kirjas. Järgmine treening võimaldab võrrelda kiirust, distantsi ja aega."],
+  ["Есть первая точка. Следующая тренировка даст сравнение.", "Esimene tulemus on kirjas. Järgmine treening võimaldab võrrelda."],
+  ["Недостаточно данных для тренда", "Trendi jaoks pole piisavalt andmeid"],
+  ["нужна ещё одна тренировка для сравнения", "võrdlemiseks on vaja veel üht treeningut"],
+  ["Нужна ещё одна тренировка", "Vaja on veel üht treeningut"],
+  ["Нужна ещё одна точка", "Vaja on veel üht tulemust"],
+  ["Недостаточно данных", "Pole piisavalt andmeid"],
+  ["нет корректного сравнения", "sobiv võrdlus puudub"],
+  ["без изменений к прошлой тренировке", "eelmise treeninguga võrreldes muutuseta"],
+  ["без изменений к прошлому разу", "eelmise korraga võrreldes muutuseta"],
+  ["к прошлой тренировке", "võrreldes eelmise treeninguga"],
+  ["к прошлому разу", "võrreldes eelmise korraga"],
+  ["первая тренировка", "esimene treening"],
+  ["Первая точка", "Esimene tulemus"],
+  ["Тренд предварительный", "Trend on esialgne"],
+  ["Нет истории", "Ajalugu puudub"],
+  ["нет истории", "ajalugu puudub"],
+  ["История пока пустая.", "Ajalugu on praegu tühi."],
+  ["В этом месяце тренировок нет.", "Sel kuul treeninguid pole."],
+  ["Упражнение не найдено", "Harjutust ei leitud"],
+  ["Удалённое упражнение", "Kustutatud harjutus"],
+  ["Прошлых рабочих подходов пока нет.", "Varasemaid tööseeriaid veel pole."],
+  ["Прошлых разминочных подходов пока нет.", "Varasemaid soojendusseeriaid veel pole."],
+  ["Введите вес и повторы", "Sisesta raskus ja kordused"],
+  ["Вес должен быть больше 0", "Raskus peab olema suurem kui 0"],
+  ["Повторы должны быть больше 0", "Korduste arv peab olema suurem kui 0"],
+  ["Запас должен быть 0 или больше", "Varu peab olema vähemalt 0"],
+  ["Время должно быть больше 0", "Aeg peab olema suurem kui 0"],
+  ["Дистанция должна быть больше 0", "Distants peab olema suurem kui 0"],
+  ["Редактирование подхода", "Seeria muutmine"],
+  ["Редактирование кардио", "Kardiokirje muutmine"],
+  ["Редактировать упражнение", "Muuda harjutust"],
+  ["Редактировать кардио", "Muuda kardiokirjet"],
+  ["Редактировать подход", "Muuda seeriat"],
+  ["Удалить упражнение", "Kustuta harjutus"],
+  ["Удалить подход", "Kustuta seeria"],
+  ["Удалить запись", "Kustuta kirje"],
+  ["Удалить запись?", "Kas kustutada kirje?"],
+  ["Упражнение обновлено", "Harjutus on uuendatud"],
+  ["Упражнение добавлено", "Harjutus on lisatud"],
+  ["Кардио изменено", "Kardiokirje on muudetud"],
+  ["Кардио записано", "Kardiokirje on salvestatud"],
+  ["Подход изменён", "Seeria on muudetud"],
+  ["Разминка записана", "Soojendus on salvestatud"],
+  ["Подход записан", "Seeria on salvestatud"],
+  ["Запись удалена", "Kirje on kustutatud"],
+  ["Своя картинка", "Oma pilt"],
+  ["Вес вместе со штангой", "Raskus koos kangiga"],
+  ["Запас повторов", "Korduste varu"],
+  ["Настройка тренажёра", "Seadme seadistus"],
+  ["Дистанция за сессию.", "Treeningu distants."],
+  ["Расчётное время на 3000 м по текущему среднему темпу. Ниже = лучше.", "Arvestuslik 3000 m aeg praeguse keskmise tempo põhjal. Väiksem on parem."],
+  ["Лучший e1RM за тренировку.", "Treeningu parim e1RM."],
+  ["Рабочих подходов нет.", "Tööseeriaid pole."],
+  ["Показать разминку", "Näita soojendust"],
+  ["Скрыть разминку", "Peida soojendus"],
+  ["Подставить разминку", "Kasuta soojenduse soovitust"],
+  ["Подставить рабочий", "Kasuta tööseeria soovitust"],
+  ["Повторить последний", "Korda viimast"],
+  ["Лучший прошлый", "Eelmise korra parim"],
+  ["Рабочий запас", "Tööseeria varu"],
+  ["Разминка запас", "Soojenduse varu"],
+  ["Короткий график прогресса", "Lühike arengugraafik"],
+  ["Прогресс упражнения", "Harjutuse areng"],
+  ["Выбор упражнения", "Harjutuse valik"],
+  ["Последние тренировки", "Viimased treeningud"],
+  ["Расчётный максимум", "Arvestuslik maksimum"],
+  ["расч. максимум", "arvestuslik maksimum"],
+  ["Макс. вес", "Suurim raskus"],
+  ["Тяжёлые подходы", "Rasked seeriad"],
+  ["Средний запас", "Keskmine varu"],
+  ["Среди рабочих подходов.", "Tööseeriate hulgas."],
+  ["Без разминки.", "Ilma soojenduseta."],
+  ["Тоннаж", "Kogumaht"],
+  ["Производительность", "Sooritus"],
+  ["производительность", "sooritus"],
+  ["Дистанция", "Distants"],
+  ["дистанция", "distants"],
+  ["Скорость", "Kiirus"],
+  ["скорость", "kiirus"],
+  ["Темп", "Tempo"],
+  ["темп", "tempo"],
+  ["Время", "Aeg"],
+  ["времени", "aega"],
+  ["Устойчивость", "Stabiilsus"],
+  ["Пик силы", "Jõu tipp"],
+  ["Объём", "Maht"],
+  ["объём", "maht"],
+  ["Серия", "Seeria"],
+  ["падение", "langus"],
+  ["Сила", "Jõud"],
+  ["Запас", "Varu"],
+  ["запас", "varu"],
+  ["Вывод", "Kokkuvõte"],
+  ["Больше = лучше.", "Suurem on parem."],
+  ["Ниже = быстрее.", "Väiksem on kiirem."],
+  ["ниже = быстрее", "väiksem on kiirem"],
+  ["ниже лучше", "väiksem on parem"],
+  ["меньше лучше", "väiksem on parem"],
+  ["лучший", "parim"],
+  ["История", "Ajalugu"],
+  ["Прогресс", "Areng"],
+  ["Упражнения", "Harjutused"],
+  ["упражнений", "harjutust"],
+  ["Упражнение", "Harjutus"],
+  ["упражнение", "harjutus"],
+  ["Подходы сегодня", "Tänased seeriad"],
+  ["подходов", "seeriat"],
+  ["Подходов", "Seeriaid"],
+  ["подх.", "seeriat"],
+  ["рабочих", "tööseeriat"],
+  ["раб.", "tööseeriat"],
+  ["тяж.", "rasket"],
+  ["трен.", "treeningut"],
+  ["зап.", "kirjet"],
+  ["Сегодня", "Täna"],
+  ["сегодня", "täna"],
+  ["Всего сегодня", "Täna kokku"],
+  ["Открыть день", "Ava päev"],
+  ["Открыть", "Ava"],
+  ["Свернуть", "Sulge"],
+  ["Новое упражнение", "Uus harjutus"],
+  ["Новое", "Uus"],
+  ["Найти упражнение", "Otsi harjutust"],
+  ["В работе", "Kasutatud"],
+  ["Название", "Nimi"],
+  ["Иконка", "Ikoon"],
+  ["Группа", "Rühm"],
+  ["Оборудование", "Varustus"],
+  ["Сохранить изменения", "Salvesta muudatused"],
+  ["Сохранить", "Salvesta"],
+  ["Добавить", "Lisa"],
+  ["Закрыть", "Sulge"],
+  ["Назад", "Tagasi"],
+  ["Править", "Muuda"],
+  ["Динамика", "Muutus"],
+  ["Повторы", "Kordused"],
+  ["Разминка", "Soojendus"],
+  ["Рабочий", "Tööseeria"],
+  ["Раб.", "Töö"],
+  ["Разм.", "Sooj."],
+  ["Отмена", "Tühista"],
+  ["Записать подход", "Salvesta seeria"],
+  ["Записать кардио", "Salvesta kardio"],
+  ["Записать упражнение", "Salvesta harjutus"],
+  ["Минуты", "Minutid"],
+  ["Секунды", "Sekundid"],
+  ["мин разогрев", "min soojendus"],
+  ["мин:сек работы", "tööaeg min:sek"],
+  ["мин", "min"],
+  ["сек", "s"],
+  ["например", "näiteks"],
+  ["Гребля", "Sõudmine"],
+  ["Эллипс: спокойное кардио", "Elliptiline trenažöör: rahulik kardio"],
+  ["Кардио", "Kardio"],
+  ["кардио", "kardio"],
+  ["Жим лёжа", "Lamades surumine"],
+  ["Тяга горизонтального блока", "Istudes plokktõmme"],
+  ["Жим гантелей сидя", "Istudes hantlite surumine"],
+  ["Кроссовер", "Plokkidel lendamine"],
+  ["Трицепс на блоке", "Triitsepsi allasurumine plokil"],
+  ["Присед в смитте", "Kükk Smithi masinal"],
+  ["Румынская тяга", "Rumeenia jõutõmme"],
+  ["Выпады с гантелями", "Väljaasted hantlitega"],
+  ["Тяга вертикального блока", "Ülalt plokktõmme"],
+  ["Пресс", "Kõhulihased"],
+  ["Тяга гантели в наклоне", "Hantlitõmme kummargil"],
+  ["Разведения гантелей в стороны", "Hantlite tõsted külgedele"],
+  ["Бицепс с гантелями", "Biitseps hantlitega"],
+  ["Гребля", "Sõudmine"],
+  ["Жим", "Surumine"],
+  ["Тяга", "Tõmme"],
+  ["Ноги", "Jalad"],
+  ["Кор", "Keretüvi"],
+  ["Другое", "Muu"],
+  ["Штанга", "Kang"],
+  ["Гантели", "Hantlid"],
+  ["Тренажер", "Masin"],
+  ["Блок", "Plokk"],
+  ["Смит", "Smith"],
+  ["Свой вес", "Keharaskus"],
+  ["Установить", "Paigalda"],
+  ["Обновить", "Uuenda"],
+  ["Проверить обновления", "Kontrolli uuendusi"],
+  ["Данные", "Andmed"],
+  ["Версия данных", "Andmeversioon"],
+  ["Дней", "Päevi"],
+  ["Размер", "Maht"],
+  ["Резервная копия", "Varukoopia"],
+  ["Скачать JSON", "Laadi JSON alla"],
+  ["Импорт JSON", "Impordi JSON"],
+  ["Установка", "Paigaldamine"],
+  ["Обновления", "Uuendused"],
+  ["Оффлайн", "Võrguühenduseta"],
+  ["Ещё", "Veel"],
+  ["Упр.", "Harj."],
+  ["Клавиатура", "Klaviatuur"],
+  ["Скрыть клавиатуру", "Peida klaviatuur"],
+  ["Цифровой ввод", "Numbrisisestus"],
+  ["0, отказ", "0, suutlikkuse piir"],
+  ["0 отказ", "0 piir"],
+  ["1 в запасе", "1 varuks"],
+  ["в запасе", "varuks"],
+  ["много запаса", "palju varu"],
+  ["очень легко", "väga kerge"],
+  ["очень тяжело", "väga raske"],
+  ["тяжело", "raske"],
+  ["средне", "keskmine"],
+  ["легко", "kerge"],
+  ["отказ", "suutlikkuse piir"],
+  ["настройка не указана", "seadistus puudub"],
+  ["настройка", "seadistus"],
+  ["по темпу", "tempo põhjal"],
+  ["за последнюю сессию", "viimase treeningu jooksul"],
+  ["по текущему среднему темпу", "praeguse keskmise tempo põhjal"],
+  ["с историей", "ajalooga"],
+  ["Нет данных.", "Andmed puuduvad."],
+  ["нет рабочих", "tööseeriaid pole"],
+  ["КБ", "KB"],
+  ["кг×повт", "kg×kord"],
+  ["кг", "kg"],
+  ["км/ч", "km/h"],
+  ["км", "km"],
+  [" м", " m"],
+  ["Текущий язык: эстонский", "Praegune keel: eesti"],
+  ["Текущий язык: русский", "Praegune keel: vene"],
+  ["Найти упражнение", "Otsi harjutust"],
+  ["темп последней", "viimase treeningu tempo"],
+  ["Расч. максимум", "Arvestuslik maksimum"],
+  ["3000 м тест", "3000 m test"],
+  ["Заслонка 9", "Siibri asend 9"],
+  ["В прошлой тренировке было только", "Eelmisel treeningul oli ainult"],
+  ["разм. подх.", "soojendusseeriat."],
+  ["раб. подх.", "tööseeriat."],
+  ["Разминка №", "Soojendus nr "],
+  ["Прошлая разминка №", "Eelmine soojendus nr "],
+  ["Прошлый рабочий №", "Eelmine tööseeria nr "],
+  ["новая и не влияет на прогресс.", "on uus ega mõjuta arengut."],
+  ["новый, сравнение не строю.", "on uus, seega võrdlust ei kuvata."],
+  ["e1RM не считается: reps+RIR > 15", "e1RM-i ei arvutata: reps+RIR > 15"],
+  ["e1RM не считается: reps + RIR > 15", "e1RM-i ei arvutata: reps + RIR > 15"],
+  ["e1RM не считается: reps+RIR &gt; 15", "e1RM-i ei arvutata: reps+RIR &gt; 15"],
+  ["Запишите хотя бы один подход.", "Salvesta vähemalt üks seeria."],
+  ["Подробнее", "Vaata lähemalt"],
+  ["Тренд считается по истории упражнения.", "Trend arvutatakse harjutuse ajaloo põhjal."],
+  ["Есть первая точка. Следующая тренировка даст сравнение силы, тяжёлых подходов, тоннажа и запаса.", "Esimene tulemus on kirjas. Järgmine treening võimaldab võrrelda jõudu, raskeid seeriaid, kogumahtu ja varu."],
+  ["Сила выросла:", "Jõud kasvas:"],
+  ["Расчётный максимум снизился на", "Arvestuslik maksimum vähenes"],
+  ["Это может быть усталость, меньший запас или обычное колебание.", "Põhjuseks võib olla väsimus, väiksem varu või tavapärane kõikumine."],
+  ["Расчётный максимум почти не изменился.", "Arvestuslik maksimum jäi peaaegu samaks."],
+  ["Для корректного сравнения силы пока не хватает валидных подходов.", "Jõu korrektseks võrdlemiseks pole veel piisavalt sobivaid seeriaid."],
+  ["Качественный объём вырос:", "Kvaliteetne maht kasvas:"],
+  ["Тяжёлых подходов меньше:", "Raskeid seeriaid oli vähem:"],
+  ["Тоннаж вырос на", "Kogumaht kasvas"],
+  ["Тоннаж ниже на", "Kogumaht vähenes"],
+  ["Средний запас снизился до", "Keskmine varu vähenes tasemele"],
+  ["работа стала ближе к отказу.", "töö jõudis suutlikkuse piirile lähemale."],
+  ["Средний запас вырос до", "Keskmine varu kasvas tasemele"],
+  ["тренировка была дальше от отказа.", "treening jäi suutlikkuse piirist kaugemale."],
+  ["Вывод предварительный: истории пока мало.", "Kokkuvõte on esialgne, sest ajalugu on veel vähe."],
+  ["e1RM: ", "e1RM: "],
+  ["тяжёлые:", "rasked seeriad:"],
+  ["тоннаж:", "kogumaht:"],
+  ["Рабочие подходы с запасом 0–3.", "Tööseeriad varuga 0–3."],
+  ["Меньше = ближе к отказу.", "Väiksem tähendab suutlikkuse piirile lähemal."],
+  ["Первая точка по гребле:", "Esimene sõudmistulemus:"],
+  [" по этому темпу", " selle tempo põhjal"],
+  [" за ", " ajaga "],
+  ["средний темп", "keskmine tempo"],
+  ["Сравнение появится после следующей тренировки.", "Võrdlus ilmub pärast järgmist treeningut."],
+  ["Производительность почти не изменилась.", "Sooritus jäi peaaegu samaks."],
+  ["Производительность выросла на", "Sooritus kasvas"],
+  ["Производительность снизилась на", "Sooritus vähenes"],
+  ["Темп улучшился на", "Tempo paranes"],
+  ["Темп стал медленнее на", "Tempo aeglustus"],
+  ["Темп почти не изменился.", "Tempo jäi peaaegu samaks."],
+  ["Дистанция выросла на", "Distants suurenes"],
+  ["Дистанция стала меньше на", "Distants vähenes"],
+  ["Расчётные 3000 м быстрее на", "Arvestuslik 3000 m aeg paranes"],
+  ["Расчётные 3000 м медленнее на", "Arvestuslik 3000 m aeg halvenes"],
+  ["Тренд предварительный: всего 2 тренировки.", "Trend on esialgne: treeninguid on ainult kaks."],
+  ["Условный индекс: больше = лучше. Учитывает дистанцию и среднюю скорость.", "Võrdlusindeks: suurem on parem. Arvestab distantsi ja keskmist kiirust."],
+  ["лучший чистый 1ПМ", "parim puhas 1RM"],
+  ["рабочие кг×повт", "töömaht kg×kord"],
+  ["средний RIR 0-10", "keskmine RIR 0–10"],
+  ["эквивалент по темпу", "tempo põhjal arvutatud tulemus"],
+  ["падение меньше = лучше", "väiksem langus on parem"],
+  ["расчётный максимум", "arvestuslik maksimum"],
+  ["упр.", "harj."],
+  ["пик", "tipp"],
+  ["1ПМ", "1RM"],
+  ["средняя", "keskmine"],
+  ["рабочие подходы", "tööseeriad"],
+  ["средняя скорость выше", "keskmine kiirus on suurem"],
+  ["средняя скорость ниже", "keskmine kiirus on väiksem"],
+  ["дистанция выше", "distants on pikem"],
+  ["дистанция ниже", "distants on lühem"],
+  ["времени больше", "aega kulus rohkem"],
+  ["времени меньше", "aega kulus vähem"],
+  ["производительность выросла", "sooritus paranes"],
+  ["производительность снизилась", "sooritus halvenes"],
+  ["объём выше", "maht on suurem"],
+  ["объём ниже", "maht on väiksem"],
+  ["запаса больше", "varu on suurem"],
+  ["запаса меньше", "varu on väiksem"],
+  ["Пн", "E"], ["Вт", "T"], ["Ср", "K"], ["Чт", "N"], ["Пт", "R"], ["Сб", "L"], ["Вс", "P"]
+];
+const sortedEstonianPhrases = estonianPhrases.slice().sort(([a], [b]) => b.length - a.length);
+
+function localizeText(value) {
+  if (currentLanguage !== "et" || value == null) return String(value ?? "");
+  return sortedEstonianPhrases.reduce((text, [source, target]) => text.split(source).join(target), String(value));
+}
+
+function localizeUi(root) {
+  if (currentLanguage !== "et") return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) node.nodeValue = localizeText(node.nodeValue);
+  root.querySelectorAll("[placeholder], [aria-label], [title]").forEach((element) => {
+    ["placeholder", "aria-label", "title"].forEach((attribute) => {
+      if (element.hasAttribute(attribute)) element.setAttribute(attribute, localizeText(element.getAttribute(attribute)));
+    });
+  });
+}
+
+function applyDocumentLanguage() {
+  document.documentElement.lang = currentLanguage;
+  document.title = currentLanguage === "et" ? "Treeningpäevik" : "Силовой журнал";
+  const description = document.querySelector('meta[name="description"]');
+  if (description) description.content = currentLanguage === "et"
+    ? "Kohalik jõutreeningute päevik"
+    : "Локальный журнал силовых упражнений";
+}
 const categories = [
   ["push", "Жим"],
   ["pull", "Тяга"],
@@ -95,7 +485,7 @@ function loadState() {
       createdAt: now + index
     })),
     sets: [],
-    settings: { unit: "кг" }
+    settings: { unit: "кг", language: currentLanguage }
   });
 }
 
@@ -104,10 +494,13 @@ function migrateState(input) {
     schemaVersion: DATA_VERSION,
     exercises: [],
     sets: [],
-    settings: { unit: "кг", autoUpdateCheck: true },
+    settings: { unit: "кг", autoUpdateCheck: true, language: currentLanguage },
     ...input
   };
-  migrated.settings = { unit: "кг", autoUpdateCheck: true, ...(input.settings || {}) };
+  migrated.settings = { unit: "кг", autoUpdateCheck: true, language: currentLanguage, ...(input.settings || {}) };
+  if (!localStorage.getItem(LANGUAGE_KEY) && ["et", "ru"].includes(migrated.settings.language)) {
+    currentLanguage = migrated.settings.language;
+  }
   migrated.exercises = (input.exercises || []).map((exercise) => ({
     id: exercise.id || uid(),
     name: exercise.name === "Гребля 3000 м" ? "Гребля" : exercise.name || "Упражнение",
@@ -172,6 +565,8 @@ function migrateState(input) {
 }
 
 function saveState() {
+  state.settings.language = currentLanguage;
+  localStorage.setItem(LANGUAGE_KEY, currentLanguage);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -197,7 +592,7 @@ function formatWeight(value) {
 }
 
 function formatDateTime(ts) {
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(currentLanguage === "et" ? "et-EE" : "ru-RU", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -206,7 +601,7 @@ function formatDateTime(ts) {
 }
 
 function formatDate(ts) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(new Date(ts));
+  return new Intl.DateTimeFormat(currentLanguage === "et" ? "et-EE" : "ru-RU", { day: "2-digit", month: "2-digit" }).format(new Date(ts));
 }
 
 function dayKey(ts) {
@@ -219,7 +614,7 @@ function monthKey(date) {
 }
 
 function monthTitle(date) {
-  return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(date);
+  return new Intl.DateTimeFormat(currentLanguage === "et" ? "et-EE" : "ru-RU", { month: "long", year: "numeric" }).format(date);
 }
 
 function shiftMonth(date, delta) {
@@ -663,10 +1058,13 @@ function render() {
     <div class="shell">
       <header class="topbar">
         <button class="brand" data-action="home" aria-label="На главную">
-          <span class="brand-mark">Ж</span>
+          <span class="brand-mark">${currentLanguage === "et" ? "T" : "Ж"}</span>
           <span><strong>Силовой журнал</strong><small>локально на устройстве</small></span>
         </button>
-        <button class="install-button" data-action="install" hidden>Установить</button>
+        <div class="topbar-actions">
+          <button class="language-switch" data-action="language" aria-label="Текущий язык: ${currentLanguage === "et" ? "эстонский" : "русский"}">${currentLanguage.toUpperCase()}</button>
+          <button class="install-button" data-action="install" hidden>Установить</button>
+        </div>
       </header>
       <main>${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
@@ -679,6 +1077,8 @@ function render() {
       </nav>
     </div>
   `;
+  applyDocumentLanguage();
+  localizeUi(app);
   bindEvents(app);
   drawCharts();
 }
@@ -697,7 +1097,10 @@ function renderHome() {
   const todayItems = setsByDay().get(dayKey(Date.now())) || [];
   const todaySummary = daySummary(todayItems);
   const query = exerciseSearchQuery.trim().toLowerCase();
-  const matchesQuery = (exercise) => !query || `${exercise.name} ${label(equipment, exercise.equipmentType)} ${label(categories, exercise.category)}`.toLowerCase().includes(query);
+  const matchesQuery = (exercise) => {
+    const searchable = `${exercise.name} ${label(equipment, exercise.equipmentType)} ${label(categories, exercise.category)}`;
+    return !query || `${searchable} ${localizeText(searchable)}`.toLowerCase().includes(query);
+  };
   const activeIds = new Set(state.sets.map((set) => set.exerciseId));
   const activeExercises = state.exercises
     .filter((exercise) => activeIds.has(exercise.id) && matchesQuery(exercise))
@@ -1005,6 +1408,7 @@ function updateStrengthComparison(root) {
   const comparison = form?.querySelector(".comparison");
   if (!form || !comparison) return;
   comparison.outerHTML = renderSetComparison(form.dataset.id, strengthFormValues(form));
+  localizeUi(form);
 }
 
 function finishSetEditing() {
@@ -1041,7 +1445,7 @@ function applySuggestedStrengthValues(root) {
   }
   strengthDraftDirty = false;
   pendingSuggestionType = null;
-  root.querySelector("#reserveText").textContent = reserveName(suggestion.reserve);
+  root.querySelector("#reserveText").textContent = localizeText(reserveName(suggestion.reserve));
   updateStrengthComparison(root);
 }
 
@@ -1893,6 +2297,13 @@ function bindEvents(root) {
   root.querySelectorAll("[data-action='progress']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress" })));
   root.querySelectorAll("[data-action='history']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "history" })));
   root.querySelectorAll("[data-action='settings']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "settings" })));
+  root.querySelector("[data-action='language']")?.addEventListener("click", () => {
+    currentLanguage = currentLanguage === "et" ? "ru" : "et";
+    saveState();
+    document.querySelector(".update-prompt")?.remove();
+    render();
+    if (waitingServiceWorker) showUpdatePrompt(waitingServiceWorker);
+  });
   root.querySelector("[data-action='toggle-form']")?.addEventListener("click", () => {
     exerciseFormOpen = !exerciseFormOpen;
     render();
@@ -1945,7 +2356,7 @@ function bindEvents(root) {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
     strengthDraftDirty = true;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = reserveName(Number(event.target.value));
+    root.querySelector("#reserveText").textContent = localizeText(reserveName(Number(event.target.value)));
     event.target.style.setProperty("--thumb-color", reserveColor(Number(event.target.value)));
     updateStrengthComparison(root);
   });
@@ -2027,7 +2438,7 @@ function bindEvents(root) {
       draftSet.reserve = reserve;
       draftSet.warmup = reserve >= 6;
     }
-    root.querySelector("#reserveText").textContent = reserveName(reserve);
+    root.querySelector("#reserveText").textContent = localizeText(reserveName(reserve));
     applySuggestedStrengthValues(root);
     updateStrengthComparison(root);
   }));
@@ -2039,7 +2450,7 @@ function bindEvents(root) {
     if (!editingSetId) draftSet.reserve = reserve;
     strengthDraftDirty = true;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = reserveName(reserve);
+    root.querySelector("#reserveText").textContent = localizeText(reserveName(reserve));
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
@@ -2078,7 +2489,7 @@ function bindEvents(root) {
     draftSet = { ...draftSet, weight: button.dataset.weight, reps: button.dataset.reps, reserve: Number(button.dataset.reserve), warmup: form.elements.warmup?.checked || false };
     strengthDraftDirty = false;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = reserveName(draftSet.reserve);
+    root.querySelector("#reserveText").textContent = localizeText(reserveName(draftSet.reserve));
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-action='use-set']").forEach((row) => row.addEventListener("click", () => {
@@ -2092,7 +2503,7 @@ function bindEvents(root) {
     draftSet = { weight: String(set.weight), reps: String(set.reps), reserve: reserveValue(set), warmup: Boolean(set.warmup) };
     strengthDraftDirty = false;
     pendingSuggestionType = null;
-    root.querySelector("#reserveText").textContent = reserveName(draftSet.reserve);
+    root.querySelector("#reserveText").textContent = localizeText(reserveName(draftSet.reserve));
     updateStrengthComparison(root);
   }));
   root.querySelector("[data-action='apply-suggestion']")?.addEventListener("click", (event) => {
@@ -2317,7 +2728,7 @@ function saveSet(event) {
 }
 
 function deleteSet(id) {
-  if (!confirm("Удалить запись?")) return;
+  if (!confirm(localizeText("Удалить запись?"))) return;
   state.sets = state.sets.filter((set) => set.id !== id);
   if (editingSetId === id) finishSetEditing();
   saveState();
@@ -2351,7 +2762,7 @@ function openEditDialog(id) {
 
 function deleteExercise(id) {
   const hasSets = state.sets.some((set) => set.exerciseId === id);
-  if (hasSets && !confirm("У упражнения есть история. Удалить упражнение и все его подходы?")) return;
+  if (hasSets && !confirm(localizeText("У упражнения есть история. Удалить упражнение и все его подходы?"))) return;
   state.exercises = state.exercises.filter((exercise) => exercise.id !== id);
   state.sets = state.sets.filter((set) => set.exerciseId !== id);
   editingExerciseId = null;
@@ -2386,14 +2797,14 @@ async function importJson(event) {
   try {
     const parsed = JSON.parse(await file.text());
     const imported = migrateState(parsed);
-    const replace = confirm("Заменить текущие локальные данные импортированным файлом?");
+    const replace = confirm(localizeText("Заменить текущие локальные данные импортированным файлом?"));
     if (!replace) return;
     state = imported;
     saveState();
     route = { name: "settings" };
     render();
   } catch {
-    alert("Не удалось прочитать JSON-файл.");
+    alert(localizeText("Не удалось прочитать JSON-файл."));
   } finally {
     event.target.value = "";
   }
@@ -2401,14 +2812,14 @@ async function importJson(event) {
 
 async function checkForUpdates() {
   if (!serviceWorkerRegistration) {
-    alert("Service worker ещё не зарегистрирован.");
+    alert(localizeText("Service worker ещё не зарегистрирован."));
     return;
   }
   await serviceWorkerRegistration.update();
   if (serviceWorkerRegistration.waiting) {
     showUpdatePrompt(serviceWorkerRegistration.waiting);
   } else {
-    alert("Новая версия пока не найдена.");
+    alert(localizeText("Новая версия пока не найдена."));
   }
 }
 
@@ -2456,7 +2867,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     ctx.moveTo(pad.l, y);
     ctx.lineTo(width - pad.r, y);
     ctx.stroke();
-    ctx.fillText(yFormat(max - (range * i) / 4), 4, y + 4);
+    ctx.fillText(localizeText(yFormat(max - (range * i) / 4)), 4, y + 4);
   }
   const good = values.length < 2 || (invert ? values.at(-1) <= values.at(-2) : values.at(-1) >= values.at(-2));
   const color = neutral ? "#315d4f" : good ? "#1d775d" : "#c8543f";
@@ -2558,7 +2969,7 @@ function showChartTooltip(canvas, text) {
   const rect = canvas.getBoundingClientRect();
   chartTooltip = document.createElement("div");
   chartTooltip.className = "chart-tooltip";
-  chartTooltip.textContent = text;
+  chartTooltip.textContent = localizeText(text);
   chartTooltip.style.left = `${Math.min(window.innerWidth - 18, Math.max(8, rect.left + 12))}px`;
   chartTooltip.style.top = `${Math.max(8, rect.top + window.scrollY + 12)}px`;
   document.body.append(chartTooltip);
@@ -2622,6 +3033,7 @@ function showUpdatePrompt(worker) {
       <span>Доступна новая версия</span>
       <button type="button">Обновить</button>
     `;
+    localizeUi(prompt);
     document.body.append(prompt);
     prompt.querySelector("button").addEventListener("click", () => {
       waitingServiceWorker?.postMessage({ type: "SKIP_WAITING" });

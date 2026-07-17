@@ -1,7 +1,7 @@
 {
-  "name": "Силовой журнал",
-  "short_name": "Журнал",
-  "description": "PWA для ручного учета упражнений, подходов и прогресса",
+  "name": "Treeningpäevik",
+  "short_name": "Päevik",
+  "description": "PWA harjutuste, seeriate ja arengu käsitsi jälgimiseks",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

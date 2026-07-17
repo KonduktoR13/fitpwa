@@ -122,6 +122,21 @@ h3 {
   backdrop-filter: blur(14px);
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.language-switch {
+  min-width: 48px;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: color-mix(in srgb, var(--surface) 88%, var(--primary) 12%);
+  font-weight: 850;
+  letter-spacing: 0.06em;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
