@@ -105,6 +105,7 @@ const estonianPhrases = [
   ["Подход записан", "Seeria on salvestatud"],
   ["Запись удалена", "Kirje on kustutatud"],
   ["Своя картинка", "Oma pilt"],
+  ["Выбрать файл", "Vali fail"],
   ["Вес вместе со штангой", "Raskus koos kangiga"],
   ["Запас повторов", "Korduste varu"],
   ["Настройка тренажёра", "Seadme seadistus"],
@@ -1069,7 +1070,7 @@ function render() {
       <main>${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
       ${toast ? `<div class="toast ${toast.tone || ""}">${toast.text}</div>` : ""}
-      <nav class="bottom-nav">
+      <nav class="bottom-nav ${route.name === "exercise" || exerciseFormOpen || editingExerciseId ? "context-hidden" : ""} ${route.name === "exercise" && keypadOpen ? "keypad-active" : ""}">
         <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упр.</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
         <button class="${route.name === "history" ? "active" : ""}" data-action="history">История</button>
@@ -1223,7 +1224,7 @@ function renderExerciseForm(exercise = null) {
         <label>Иконка<input name="icon" maxlength="4" value="${exercise?.icon || "🏋️"}" /></label>
         <label>Группа<select name="category">${categories.map(([k, v]) => `<option value="${k}" ${exercise?.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
         <label>Оборудование<select name="equipmentType">${equipment.map(([k, v]) => `<option value="${k}" ${exercise?.equipmentType === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
-        <label class="wide">Своя картинка<input type="file" name="image" accept="image/*" /></label>
+        <label class="wide">Своя картинка<span class="file-picker"><span class="file-picker-text">Выбрать файл</span><input type="file" name="image" accept="image/*" data-image-input /></span></label>
       </div>
       <div class="actions">
         <button class="primary" type="submit">${exercise ? "Сохранить" : "Добавить"}</button>
@@ -2213,7 +2214,7 @@ function renderCalendar(byDate) {
         return `
           <button class="calendar-day ${items.length ? "has-training" : ""} ${activeHistoryDay === key ? "selected" : ""}" data-action="history-day" data-day="${key}">
             <strong>${date.getDate()}</strong>
-            ${items.length ? `<small>${summary.exerciseCount} упр.</small>` : ""}
+            ${items.length ? `<small title="${summary.exerciseCount} упр.">${summary.exerciseCount}</small>` : ""}
           </button>
         `;
       }).join("")}
@@ -2223,7 +2224,7 @@ function renderCalendar(byDate) {
 
 function renderHistoryDay(key, items) {
   const expanded = activeHistoryDay === key;
-  const title = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", weekday: "long" }).format(new Date(items[0].createdAt));
+  const title = new Intl.DateTimeFormat(currentLanguage === "et" ? "et-EE" : "ru-RU", { day: "numeric", month: "long", weekday: "long" }).format(new Date(items[0].createdAt));
   const summary = daySummary(items);
   const groups = groupSetsByWorkout(items);
   return `
@@ -2351,6 +2352,10 @@ function bindEvents(root) {
     }, 0);
   });
   root.querySelector("[data-form='exercise']")?.addEventListener("submit", saveExercise);
+  root.querySelectorAll("[data-image-input]").forEach((input) => input.addEventListener("change", () => {
+    const text = input.closest(".file-picker")?.querySelector(".file-picker-text");
+    if (text) text.textContent = input.files?.[0]?.name || localizeText("Выбрать файл");
+  }));
   root.querySelector("[data-form='set']")?.addEventListener("submit", saveSet);
   root.querySelector("[name='reserve']")?.addEventListener("input", (event) => {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
