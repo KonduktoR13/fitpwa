@@ -1210,25 +1210,8 @@ function renderHome() {
   const trainedToday = state.sets.filter((set) => dayKey(set.createdAt) === dayKey(Date.now())).length;
   const todayItems = setsByDay().get(dayKey(Date.now())) || [];
   const todaySummary = daySummary(todayItems);
-  const query = exerciseSearchQuery.trim().toLowerCase();
-  const matchesQuery = (exercise) => {
-    const searchable = `${exercise.name} ${label(equipment, exercise.equipmentType)} ${label(categories, exercise.category)}`;
-    return !query || `${searchable} ${localizeText(searchable)}`.toLowerCase().includes(query);
-  };
-  const favoriteIds = new Set(state.settings.favoriteExerciseIds || []);
-  const lastUsedAt = (exerciseId) => setsForExercise(exerciseId).at(-1)?.createdAt || 0;
-  const usedExercises = state.exercises
-    .filter((exercise) => lastUsedAt(exercise.id) > 0)
-    .sort((a, b) => lastUsedAt(b.id) - lastUsedAt(a.id));
-  const favoriteExercises = state.exercises.filter((exercise) => favoriteIds.has(exercise.id) && matchesQuery(exercise));
-  const recentExercises = usedExercises.filter((exercise) => !favoriteIds.has(exercise.id) && matchesQuery(exercise)).slice(0, 6);
   const todayExerciseIds = [...new Set(todayItems.slice().sort((a, b) => b.createdAt - a.createdAt).map((set) => set.exerciseId))];
   const todayExercises = todayExerciseIds.map((id) => state.exercises.find((exercise) => exercise.id === id)).filter(Boolean);
-  const grouped = categories.map(([key, title]) => [
-    key,
-    title,
-    state.exercises.filter((item) => item.category === key && matchesQuery(item))
-  ]);
   return `
     <section class="hero home-hero">
       <div>
@@ -1241,7 +1224,7 @@ function renderHome() {
         <div><strong>${trainedToday}</strong><span>сегодня</span></div>
       </div>
     </section>
-    ${todayItems.length && !query ? `
+    ${todayItems.length && !exerciseSearchQuery.trim() ? `
       <section class="panel compact-day continue-today">
         <div class="section-head">
           <div><span class="eyebrow compact-eyebrow">Сегодня</span><h2>Продолжить сегодня</h2></div>
@@ -1263,6 +1246,29 @@ function renderHome() {
       <button class="primary" data-action="toggle-form">Новое</button>
     </section>
     ${exerciseFormOpen ? renderNewExerciseEditor() : ""}
+    ${renderHomeExerciseGroups()}
+  `;
+}
+
+function renderHomeExerciseGroups() {
+  const query = exerciseSearchQuery.trim().toLowerCase();
+  const matchesQuery = (exercise) => {
+    const searchable = `${exercise.name} ${label(equipment, exercise.equipmentType)} ${label(categories, exercise.category)}`;
+    return !query || `${searchable} ${localizeText(searchable)}`.toLowerCase().includes(query);
+  };
+  const favoriteIds = new Set(state.settings.favoriteExerciseIds || []);
+  const lastUsedAt = (exerciseId) => setsForExercise(exerciseId).at(-1)?.createdAt || 0;
+  const usedExercises = state.exercises
+    .filter((exercise) => lastUsedAt(exercise.id) > 0)
+    .sort((a, b) => lastUsedAt(b.id) - lastUsedAt(a.id));
+  const favoriteExercises = state.exercises.filter((exercise) => favoriteIds.has(exercise.id) && matchesQuery(exercise));
+  const recentExercises = usedExercises.filter((exercise) => !favoriteIds.has(exercise.id) && matchesQuery(exercise)).slice(0, 6);
+  const grouped = categories.map(([key, title]) => [
+    key,
+    title,
+    state.exercises.filter((item) => item.category === key && matchesQuery(item))
+  ]);
+  return `
     <section class="exercise-groups">
       ${favoriteExercises.length && !query ? `
         <div class="group featured-group">
@@ -2588,14 +2594,7 @@ function bindEvents(root) {
       render();
       if (waitingServiceWorker) showUpdatePrompt(waitingServiceWorker);
     }));
-  root.querySelectorAll("[data-action='toggle-favorite']").forEach((button) => button.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const favorites = new Set(state.settings.favoriteExerciseIds || []);
-    favorites.has(button.dataset.id) ? favorites.delete(button.dataset.id) : favorites.add(button.dataset.id);
-    state.settings.favoriteExerciseIds = [...favorites];
-    saveState();
-    render();
-  }));
+  bindHomeCatalogEvents(root);
   root.querySelectorAll("[data-action='toggle-form']").forEach((button) => button.addEventListener("click", () => {
     exerciseFormOpen = !exerciseFormOpen;
     render();
@@ -2625,34 +2624,16 @@ function bindEvents(root) {
     state.dayNotes[input.dataset.dayNote] = input.value;
     saveState();
   }));
-  root.querySelectorAll("[data-action='toggle-exercise-group']").forEach((button) => button.addEventListener("click", () => {
-    const key = button.dataset.group;
-    expandedExerciseGroups.has(key) ? expandedExerciseGroups.delete(key) : expandedExerciseGroups.add(key);
-    render();
-  }));
-  root.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
-    const exercise = state.exercises.find((item) => item.id === card.dataset.openExercise);
-    draftSet = exercise && !isCardioExercise(exercise)
-      ? suggestedDraftSet(exercise.id)
-      : { weight: "", reps: "8", reserve: 2, warmup: false };
-    strengthDraftDirty = false;
-    pendingSuggestionType = null;
-    keypadOpen = false;
-    strengthOptionsOpen = false;
-    rirExpanded = false;
-    rirHelpOpen = false;
-    draftNote = "";
-    formError = "";
-    setRoute({ name: "exercise", id: card.dataset.openExercise });
-  }));
   root.querySelector("#search")?.addEventListener("input", (event) => {
     exerciseSearchQuery = event.target.value;
-    render();
-    window.setTimeout(() => {
-      const search = document.querySelector("#search");
-      search?.focus();
-      search?.setSelectionRange(search.value.length, search.value.length);
-    }, 0);
+    const previousGroups = root.querySelector(".exercise-groups");
+    if (!previousGroups) return;
+    previousGroups.outerHTML = renderHomeExerciseGroups();
+    const nextGroups = root.querySelector(".exercise-groups");
+    localizeUi(nextGroups);
+    bindHomeCatalogEvents(nextGroups);
+    const continueToday = root.querySelector(".continue-today");
+    if (continueToday) continueToday.hidden = Boolean(exerciseSearchQuery.trim());
   });
   root.querySelector("[data-form='exercise']")?.addEventListener("submit", saveExercise);
   root.querySelectorAll("[data-image-input]").forEach((input) => input.addEventListener("change", () => {
@@ -2921,6 +2902,37 @@ function bindEvents(root) {
   });
   root.querySelector("[data-action='undo-last']")?.addEventListener("click", undoLastChange);
   root.querySelector("[data-action='stop-timer']")?.addEventListener("click", stopRestTimer);
+}
+
+function bindHomeCatalogEvents(scope) {
+  scope.querySelectorAll("[data-action='toggle-favorite']").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const favorites = new Set(state.settings.favoriteExerciseIds || []);
+    favorites.has(button.dataset.id) ? favorites.delete(button.dataset.id) : favorites.add(button.dataset.id);
+    state.settings.favoriteExerciseIds = [...favorites];
+    saveState();
+    render();
+  }));
+  scope.querySelectorAll("[data-action='toggle-exercise-group']").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.group;
+    expandedExerciseGroups.has(key) ? expandedExerciseGroups.delete(key) : expandedExerciseGroups.add(key);
+    render();
+  }));
+  scope.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
+    const exercise = state.exercises.find((item) => item.id === card.dataset.openExercise);
+    draftSet = exercise && !isCardioExercise(exercise)
+      ? suggestedDraftSet(exercise.id)
+      : { weight: "", reps: "8", reserve: 2, warmup: false };
+    strengthDraftDirty = false;
+    pendingSuggestionType = null;
+    keypadOpen = false;
+    strengthOptionsOpen = false;
+    rirExpanded = false;
+    rirHelpOpen = false;
+    draftNote = "";
+    formError = "";
+    setRoute({ name: "exercise", id: card.dataset.openExercise });
+  }));
 }
 
 function handleKeypad(key) {
