@@ -192,6 +192,7 @@ const estonianPhrases = [
   ["Сохранить", "Salvesta"],
   ["Добавить", "Lisa"],
   ["Закрыть", "Sulge"],
+  ["Закрыть таймер", "Sulge taimer"],
   ["Назад", "Tagasi"],
   ["Править", "Muuda"],
   ["Динамика", "Muutus"],
@@ -525,6 +526,7 @@ let undoRecord = null;
 let restTimerEnd = null;
 let restTimerTick = null;
 const exerciseDrafts = new Map();
+let routeTransition = "";
 
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -705,6 +707,7 @@ function setRoute(next, { historyMode = "push", scrollY = 0 } = {}) {
     if (historyMode === "replace" || sameRoute(previous, next)) window.history.replaceState(nextState, "");
     else window.history.pushState(nextState, "");
   }
+  routeTransition = sameRoute(previous, next) ? "" : historyMode === "none" ? "back" : "forward";
   render();
   window.requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "instant" }));
 }
@@ -798,7 +801,7 @@ function reserveName(value) {
 
 function reserveColor(value) {
   const hue = 6 + Math.max(0, Math.min(10, value)) * 13;
-  return `hsl(${hue} 63% 42%)`;
+  return `hsl(${hue} 52% 58%)`;
 }
 
 function adjustedScore(set) {
@@ -1183,7 +1186,9 @@ function restTimerSecondsLeft() {
 
 function renderRestTimer() {
   const remaining = restTimerSecondsLeft();
-  return `<div class="rest-timer"><span>Отдых</span><strong class="rest-timer-value">${formatDuration(remaining)}</strong><button type="button" data-action="stop-timer">×</button></div>`;
+  const total = Math.max(1, Number(state.settings.restTimerSeconds || 90));
+  const progress = Math.max(0, Math.min(1, remaining / total));
+  return `<div class="rest-timer"><span>Отдых</span><div class="timer-ring" style="--timer-progress:${progress * 360}deg"><strong class="rest-timer-value">${formatDuration(remaining)}</strong></div><button type="button" data-action="stop-timer" aria-label="Закрыть таймер">×</button></div>`;
 }
 
 function startRestTimer() {
@@ -1194,6 +1199,8 @@ function startRestTimer() {
     const remaining = restTimerSecondsLeft();
     const output = document.querySelector(".rest-timer-value");
     if (output) output.textContent = formatDuration(remaining);
+    const ring = document.querySelector(".timer-ring");
+    if (ring) ring.style.setProperty("--timer-progress", `${Math.max(0, Math.min(1, remaining / Math.max(1, Number(state.settings.restTimerSeconds || 90)))) * 360}deg`);
     if (remaining <= 0) {
       window.clearInterval(restTimerTick);
       restTimerTick = null;
@@ -1214,6 +1221,8 @@ function stopRestTimer() {
 
 function render() {
   chartRefs = [];
+  const transitionClass = routeTransition ? `route-${routeTransition}` : "";
+  routeTransition = "";
   const app = document.querySelector("#app");
   app.innerHTML = `
     <div class="shell">
@@ -1227,12 +1236,12 @@ function render() {
           <button class="install-button" data-action="install" hidden>Установить</button>
         </div>
       </header>
-      <main>${renderRoute()}</main>
+      <main class="${transitionClass}">${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
-      ${toast ? `<div class="toast ${toast.tone || ""}">${toast.text}</div>` : ""}
-      ${undoRecord ? `<div class="undo-bar"><span>${undoRecord.message}</span><button type="button" data-action="undo-last">Отменить</button></div>` : ""}
+      ${toast && !undoRecord ? `<div class="toast ${toast.tone || ""}">${toast.text}</div>` : ""}
+      ${undoRecord ? `<div class="undo-bar"><span class="undo-message"><i aria-hidden="true">${undoRecord.kind === "insert" ? "↶" : "✓"}</i>${undoRecord.message}</span><button type="button" data-action="undo-last">Отменить</button></div>` : ""}
       ${restTimerEnd ? renderRestTimer() : ""}
-      <nav class="bottom-nav ${exerciseFormOpen || editingExerciseId ? "context-hidden" : ""} ${route.name === "exercise" && keypadOpen ? "keypad-active" : ""}">
+      <nav class="bottom-nav nav-${route.name === "exercise" ? "home" : route.name} ${exerciseFormOpen || editingExerciseId ? "context-hidden" : ""} ${route.name === "exercise" && keypadOpen ? "keypad-active" : ""}">
         <button class="${route.name === "home" || route.name === "exercise" ? "active" : ""}" data-action="home">Упр.</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
         <button class="${route.name === "history" ? "active" : ""}" data-action="history">История</button>
@@ -1408,7 +1417,7 @@ function renderExerciseForm(exercise = null) {
       </div>
       <div class="actions">
         <button class="primary" type="submit">${exercise ? "Сохранить" : "Добавить"}</button>
-        <button type="button" data-action="toggle-form">Закрыть</button>
+        <button type="button" data-action="${exercise ? "close-exercise-editor" : "toggle-form"}">Закрыть</button>
       </div>
     </form>
   `;
@@ -2927,10 +2936,10 @@ function bindEvents(root) {
     render();
   }));
   root.querySelector("[data-action='edit-exercise']")?.addEventListener("click", (event) => openEditDialog(event.currentTarget.dataset.id));
-  root.querySelector("[data-action='close-exercise-editor']")?.addEventListener("click", () => {
+  root.querySelectorAll("[data-action='close-exercise-editor']").forEach((button) => button.addEventListener("click", () => {
     editingExerciseId = null;
     render();
-  });
+  }));
   root.querySelector("[data-action='delete-exercise']")?.addEventListener("click", (event) => deleteExercise(event.currentTarget.dataset.id));
   root.querySelector("[data-action='export']")?.addEventListener("click", exportJson);
   root.querySelector("[data-action='import-file']")?.addEventListener("change", importJson);
@@ -3323,10 +3332,16 @@ function clampChartPoint(value, min, max) {
 
 function drawChart(ctx, width, height, values, labels, type, invert = false, pointValues = null, neutral = false, yFormat = formatWeight) {
   const { pad, chartW, chartH, max, min, range } = chartGeometry(width, height, values, type);
+  const theme = getComputedStyle(document.documentElement);
+  const copper = theme.getPropertyValue("--primary").trim() || "#c8895c";
+  const chartLine = theme.getPropertyValue("--chart-line").trim() || "#d8b18f";
+  const muted = theme.getPropertyValue("--muted").trim() || "#bba998";
+  const surface = theme.getPropertyValue("--surface").trim() || "#241a16";
+  const chartPoint = theme.getPropertyValue("--chart-point").trim() || "#f0c9a9";
   ctx.clearRect(0, 0, width, height);
   ctx.font = "12px system-ui";
-  ctx.strokeStyle = "rgba(105, 115, 108, 0.18)";
-  ctx.fillStyle = "#69736c";
+  ctx.strokeStyle = "rgba(230, 203, 178, 0.14)";
+  ctx.fillStyle = muted;
   for (let i = 0; i < 5; i += 1) {
     const y = pad.t + (chartH * i) / 4;
     ctx.beginPath();
@@ -3335,8 +3350,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     ctx.stroke();
     ctx.fillText(localizeText(yFormat(max - (range * i) / 4)), 4, y + 4);
   }
-  const good = values.length < 2 || (invert ? values.at(-1) <= values.at(-2) : values.at(-1) >= values.at(-2));
-  const color = neutral ? "#315d4f" : good ? "#1d775d" : "#c8543f";
+  const color = neutral ? copper : chartLine;
   if (type === "bar") {
     const slot = chartW / values.length;
     values.forEach((value, index) => {
@@ -3344,7 +3358,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
       const x = pad.l + slot * index + slot * 0.18;
       const y = pad.t + chartH - barH;
       const radius = 7;
-      ctx.fillStyle = neutral ? "#315d4f" : index === values.length - 1 ? "#d99a32" : "#315d4f";
+      ctx.fillStyle = neutral ? copper : index === values.length - 1 ? chartPoint : copper;
       roundRect(ctx, x, y, slot * 0.64, barH, radius);
       ctx.fill();
     });
@@ -3379,8 +3393,8 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     values.forEach((value, index) => {
       const x = clampChartPoint(pad.l + (chartW * index) / Math.max(1, values.length - 1), pad.l + 7, pad.l + chartW - 7);
       const y = clampChartPoint(pad.t + chartH - ((value - min) / range) * chartH, pad.t + 8, pad.t + chartH - 8);
-      ctx.fillStyle = pointValues ? reserveColor(pointValues[index]) : index === values.length - 1 ? "#f4f7f2" : color;
-      ctx.strokeStyle = "#fff";
+      ctx.fillStyle = pointValues ? reserveColor(pointValues[index]) : index === values.length - 1 ? surface : color;
+      ctx.strokeStyle = chartPoint;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(x, y, index === values.length - 1 ? 6.5 : 5.5, 0, Math.PI * 2);
@@ -3388,7 +3402,7 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
       ctx.stroke();
     });
   }
-  ctx.fillStyle = "#69736c";
+  ctx.fillStyle = muted;
   labels.forEach((label, index) => {
     if (index !== 0 && index !== labels.length - 1 && index % Math.ceil(labels.length / 4) !== 0) return;
     const x = pad.l + (chartW * index) / Math.max(1, labels.length - 1);
