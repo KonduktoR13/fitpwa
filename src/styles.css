@@ -2074,6 +2074,11 @@ h3 {
     display: none;
   }
 
+  .shell:has(.set-entry textarea:focus) .bottom-nav,
+  .shell:has(.set-entry input:not([readonly]):focus) .bottom-nav {
+    display: none;
+  }
+
   .bottom-nav {
     grid-template-columns: repeat(4, 1fr);
     right: 8px;

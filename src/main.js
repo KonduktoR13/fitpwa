@@ -524,6 +524,7 @@ let draftNote = "";
 let undoRecord = null;
 let restTimerEnd = null;
 let restTimerTick = null;
+const exerciseDrafts = new Map();
 
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -644,7 +645,50 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function setRoute(next) {
+function rememberCurrentExerciseDraft() {
+  if (route.name !== "exercise" || editingSetId) return;
+  const form = document.querySelector("[data-form='set']");
+  if (!form) return;
+  if (form.dataset.kind === "strength") {
+    rememberStrengthForm(form);
+    exerciseDrafts.set(route.id, { kind: "strength", values: { ...draftSet }, note: draftNote });
+    return;
+  }
+  draftCardio = {
+    minutes: form.elements.minutes?.value || "",
+    seconds: form.elements.seconds?.value || "",
+    distanceM: form.elements.distanceM?.value || "",
+    setting: form.elements.setting?.value || ""
+  };
+  draftNote = form.elements.note?.value || "";
+  exerciseDrafts.set(route.id, { kind: "cardio", values: { ...draftCardio }, note: draftNote });
+}
+
+function restoreExerciseDraft(exerciseId) {
+  const exercise = state.exercises.find((item) => item.id === exerciseId);
+  if (!exercise) return;
+  const saved = exerciseDrafts.get(exerciseId);
+  if (saved) {
+    if (saved.kind === "cardio") draftCardio = { ...saved.values };
+    else draftSet = { ...saved.values };
+    draftNote = saved.note || "";
+  } else if (isCardioExercise(exercise)) {
+    draftCardio = { minutes: "", seconds: "", distanceM: "", setting: "" };
+    draftNote = "";
+  } else {
+    draftSet = suggestedDraftSet(exerciseId);
+    draftNote = "";
+  }
+}
+
+function sameRoute(left, right) {
+  return left?.name === right?.name && (left?.id || null) === (right?.id || null);
+}
+
+function setRoute(next, { historyMode = "push", scrollY = 0 } = {}) {
+  const previous = route;
+  if (previous.name === "exercise" && !sameRoute(previous, next)) rememberCurrentExerciseDraft();
+  if (next.name === "exercise" && !editingSetId && !sameRoute(previous, next)) restoreExerciseDraft(next.id);
   route = next;
   if (next.name === "home") expandedExerciseGroups = new Set();
   if (next.name !== "exercise") {
@@ -654,10 +698,15 @@ function setRoute(next) {
     formError = "";
     strengthOptionsOpen = false;
     rirHelpOpen = false;
-    draftNote = "";
   }
-  window.scrollTo({ top: 0, behavior: "instant" });
+  if (historyMode !== "none") {
+    window.history.replaceState({ ...(window.history.state || {}), trainingLogRoute: previous, scrollY: window.scrollY }, "");
+    const nextState = { trainingLogRoute: next, scrollY: 0 };
+    if (historyMode === "replace" || sameRoute(previous, next)) window.history.replaceState(nextState, "");
+    else window.history.pushState(nextState, "");
+  }
   render();
+  window.requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "instant" }));
 }
 
 function label(list, key) {
@@ -1183,8 +1232,8 @@ function render() {
       ${toast ? `<div class="toast ${toast.tone || ""}">${toast.text}</div>` : ""}
       ${undoRecord ? `<div class="undo-bar"><span>${undoRecord.message}</span><button type="button" data-action="undo-last">Отменить</button></div>` : ""}
       ${restTimerEnd ? renderRestTimer() : ""}
-      <nav class="bottom-nav ${route.name === "exercise" || exerciseFormOpen || editingExerciseId ? "context-hidden" : ""} ${route.name === "exercise" && keypadOpen ? "keypad-active" : ""}">
-        <button class="${route.name === "home" ? "active" : ""}" data-action="home">Упр.</button>
+      <nav class="bottom-nav ${exerciseFormOpen || editingExerciseId ? "context-hidden" : ""} ${route.name === "exercise" && keypadOpen ? "keypad-active" : ""}">
+        <button class="${route.name === "home" || route.name === "exercise" ? "active" : ""}" data-action="home">Упр.</button>
         <button class="${route.name === "progress" ? "active" : ""}" data-action="progress">Прогресс</button>
         <button class="${route.name === "history" ? "active" : ""}" data-action="history">История</button>
         <button class="${route.name === "settings" ? "active" : ""}" data-action="settings">Настр.</button>
@@ -1424,7 +1473,7 @@ function renderExercise(exerciseId) {
     : { ...draftSet, note: draftNote };
   return `
     <section class="exercise-header">
-      <button data-action="home" class="ghost">← Назад</button>
+      <button data-action="app-back" class="ghost">← Назад</button>
       <div class="exercise-title">
         <div class="exercise-icon large">${iconHtml(exercise)}</div>
         <div><h1>${exercise.name}</h1><p>${label(categories, exercise.category)} · ${label(equipment, exercise.equipmentType)}</p></div>
@@ -1615,6 +1664,7 @@ function finishSetEditing() {
     activeHistoryDay = returnRoute.activeHistoryDay || activeHistoryDay;
     historyCursor = returnRoute.historyCursor ? new Date(returnRoute.historyCursor) : historyCursor;
     route = { name: "history" };
+    window.history.replaceState({ trainingLogRoute: route, scrollY: 0 }, "");
     return;
   }
 }
@@ -2584,6 +2634,7 @@ function bindEvents(root) {
     }
   });
   root.querySelectorAll("[data-action='home']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "home" })));
+  root.querySelectorAll("[data-action='app-back']").forEach((button) => button.addEventListener("click", () => window.history.back()));
   root.querySelectorAll("[data-action='progress']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "progress" })));
   root.querySelectorAll("[data-action='history']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "history" })));
   root.querySelectorAll("[data-action='settings']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "settings" })));
@@ -2602,10 +2653,10 @@ function bindEvents(root) {
   root.querySelectorAll("[data-action='history-day']").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.day;
     activeHistoryDay = activeHistoryDay === key ? null : key;
-    if (route.name !== "history") route = { name: "history" };
     const [year, month] = key.split("-").map(Number);
     historyCursor = new Date(year, month - 1, 1);
-    render();
+    if (route.name !== "history") setRoute({ name: "history" });
+    else render();
   }));
   root.querySelectorAll("[data-action='history-exercise']").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.key;
@@ -2919,17 +2970,12 @@ function bindHomeCatalogEvents(scope) {
     render();
   }));
   scope.querySelectorAll("[data-open-exercise]").forEach((card) => card.addEventListener("click", () => {
-    const exercise = state.exercises.find((item) => item.id === card.dataset.openExercise);
-    draftSet = exercise && !isCardioExercise(exercise)
-      ? suggestedDraftSet(exercise.id)
-      : { weight: "", reps: "8", reserve: 2, warmup: false };
     strengthDraftDirty = false;
     pendingSuggestionType = null;
     keypadOpen = false;
     strengthOptionsOpen = false;
     rirExpanded = false;
     rirHelpOpen = false;
-    draftNote = "";
     formError = "";
     setRoute({ name: "exercise", id: card.dataset.openExercise });
   }));
@@ -3173,9 +3219,7 @@ function startEditSet(id) {
   editingSetId = id;
   activeSetField = "weight";
   lastTouchedSetId = id;
-  route = { name: "exercise", id: set.exerciseId };
-  window.scrollTo({ top: 0, behavior: "instant" });
-  render();
+  setRoute({ name: "exercise", id: set.exerciseId });
 }
 
 function openEditDialog(id) {
@@ -3189,9 +3233,9 @@ function deleteExercise(id) {
   state.exercises = state.exercises.filter((exercise) => exercise.id !== id);
   state.sets = state.sets.filter((set) => set.exerciseId !== id);
   editingExerciseId = null;
-  if (route.name === "exercise" && route.id === id) route = { name: "home" };
   saveState();
-  render();
+  if (route.name === "exercise" && route.id === id) setRoute({ name: "home" }, { historyMode: "replace" });
+  else render();
 }
 
 function fileToDataUrl(file) {
@@ -3224,8 +3268,7 @@ async function importJson(event) {
     if (!replace) return;
     state = imported;
     saveState();
-    route = { name: "settings" };
-    render();
+    setRoute({ name: "settings" }, { historyMode: "replace" });
   } catch {
     alert(localizeText("Не удалось прочитать JSON-файл."));
   } finally {
@@ -3411,6 +3454,16 @@ document.addEventListener("click", async (event) => {
   deferredInstallPrompt = null;
 });
 window.addEventListener("resize", drawCharts);
+
+window.history.scrollRestoration = "manual";
+window.history.replaceState({ trainingLogRoute: route, scrollY: window.scrollY }, "");
+window.addEventListener("popstate", (event) => {
+  const candidate = event.state?.trainingLogRoute;
+  const next = candidate?.name === "exercise" && !state.exercises.some((exercise) => exercise.id === candidate.id)
+    ? { name: "home" }
+    : candidate?.name ? candidate : { name: "home" };
+  setRoute(next, { historyMode: "none", scrollY: Number(event.state?.scrollY) || 0 });
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", registerServiceWorker);
