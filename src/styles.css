@@ -796,7 +796,20 @@ h3 {
 }
 
 .change-grid strong {
-  font-size: 1.15rem;
+  font-size: 1.02rem;
+  line-height: 1.25;
+}
+
+.change-grid small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.comparison-caption {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .change-grid .good strong {
@@ -812,9 +825,32 @@ h3 {
 }
 
 .progress-explanation {
+  display: grid;
+  gap: 14px;
   border-top: 1px solid var(--line);
   margin-top: 10px;
-  padding-top: 2px;
+  padding-top: 14px;
+}
+
+.explanation-block {
+  display: grid;
+  gap: 7px;
+}
+
+.explanation-block h3 {
+  font-size: 1rem;
+}
+
+.explanation-block p,
+.comparison-caution {
+  line-height: 1.48;
+}
+
+.comparison-caution {
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--muted);
+  background: var(--surface-2);
 }
 
 .exercise-card.empty-history {

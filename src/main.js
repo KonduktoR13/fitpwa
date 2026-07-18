@@ -1851,22 +1851,75 @@ function signedMetric(value, suffix = "") {
 }
 
 function renderStrengthChanges(last, previous, sessions) {
-  if (!previous) return `<section class="panel progress-note"><h2>С прошлого раза</h2><p class="muted">Это первая тренировка упражнения. Сравнение появится после следующей.</p></section>`;
+  const et = currentLanguage === "et";
+  const weightUnit = et ? " kg" : " кг";
+  if (!previous) return `<section class="panel progress-note"><h2>${et ? "Treeningute võrdlus" : "Сравнение тренировок"}</h2><p class="muted">${et ? "Praegu on selle harjutuse kohta üks treening. Võrdlus ilmub pärast järgmist treeningut." : "Пока записана одна тренировка этого упражнения. Сравнение появится после следующей."}</p></section>`;
   const strengthDelta = last.bestSessionE1RM && previous.bestSessionE1RM ? last.bestSessionE1RM - previous.bestSessionE1RM : null;
   const changes = [
-    ["Сила", strengthDelta, signedMetric(strengthDelta, " кг")],
-    ["Тяжёлые", last.hardSets - previous.hardSets, signedMetric(last.hardSets - previous.hardSets)],
-    ["Объём", last.tonnage - previous.tonnage, signedMetric(last.tonnage - previous.tonnage, " кг")],
-    ["Средний RIR", last.avgReserve - previous.avgReserve, signedMetric(last.avgReserve - previous.avgReserve)]
+    {
+      title: et ? "Arvestuslik maksimum" : "Расчётный максимум",
+      before: previous.bestSessionE1RM ? `${formatWeight(previous.bestSessionE1RM)}${weightUnit}` : "—",
+      after: last.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)}${weightUnit}` : "—",
+      delta: signedMetric(strengthDelta, weightUnit),
+      tone: strengthDelta == null || Math.abs(strengthDelta) < 0.05 ? "" : strengthDelta > 0 ? "good" : "bad"
+    },
+    {
+      title: et ? "Rasked seeriad" : "Тяжёлые подходы",
+      before: String(previous.hardSets),
+      after: String(last.hardSets),
+      delta: signedMetric(last.hardSets - previous.hardSets),
+      tone: ""
+    },
+    {
+      title: et ? "Kogumaht" : "Тоннаж",
+      before: `${formatWeight(previous.tonnage)}${weightUnit}`,
+      after: `${formatWeight(last.tonnage)}${weightUnit}`,
+      delta: signedMetric(last.tonnage - previous.tonnage, weightUnit),
+      tone: ""
+    },
+    {
+      title: et ? "Keskmine varu" : "Средний запас",
+      before: `${formatWeight(previous.avgReserve)} RIR`,
+      after: `${formatWeight(last.avgReserve)} RIR`,
+      delta: signedMetric(last.avgReserve - previous.avgReserve),
+      tone: ""
+    }
   ];
+  const reserveDelta = last.avgReserve - previous.avgReserve;
+  const reserveMeaning = reserveDelta < -0.05
+    ? et
+      ? `Eelmisel treeningul oli keskmine ${formatWeight(previous.avgReserve)} RIR. Muutus ${signedMetric(reserveDelta)} tähendab, et viimane treening oli veidi suutlikkuse piirile lähemal.`
+      : `На предыдущей тренировке среднее значение было ${formatWeight(previous.avgReserve)} RIR. Изменение ${signedMetric(reserveDelta)} означает, что последняя тренировка была немного ближе к отказу.`
+    : reserveDelta > 0.05
+      ? et
+        ? `Eelmisel treeningul oli keskmine ${formatWeight(previous.avgReserve)} RIR. Muutus ${signedMetric(reserveDelta)} tähendab, et viimases treeningus jäi rohkem kordusi varuks.`
+        : `На предыдущей тренировке среднее значение было ${formatWeight(previous.avgReserve)} RIR. Изменение ${signedMetric(reserveDelta)} означает, что в последней тренировке оставалось больше повторов в запасе.`
+      : et
+        ? `Keskmine RIR jäi eelmise treeninguga peaaegu samaks.`
+        : `Средний RIR почти не изменился по сравнению с предыдущей тренировкой.`;
   return `
     <section class="panel progress-note structured-note">
-      <div class="section-head"><h2>С прошлого раза</h2><span>${formatDate(previous.date)} → ${formatDate(last.date)}</span></div>
+      <div class="section-head"><h2>${et ? "Kahe viimase treeningu võrdlus" : "Сравнение двух последних тренировок"}</h2><span>${formatDate(previous.date)} → ${formatDate(last.date)}</span></div>
+      <p class="comparison-caption">${et ? "Vasakul on eelmine, paremal viimane treening. Arvesse lähevad ainult tööseeriad." : "Слева предыдущая, справа последняя тренировка. Учитываются только рабочие подходы."}</p>
       <div class="change-grid">
-        ${changes.map(([title, delta, value]) => `<div class="${delta == null || Math.abs(delta) < 0.05 ? "" : delta > 0 ? "good" : "bad"}"><span>${title}</span><strong>${value}</strong></div>`).join("")}
+        ${changes.map((item) => `<div class="${item.tone}"><span>${item.title}</span><strong>${item.before} → ${item.after}</strong><small>${et ? "Muutus" : "Изменение"}: ${item.delta}</small></div>`).join("")}
       </div>
-      <button class="ghost explanation-toggle" data-action="toggle-progress-explanation">${progressExplanationOpen ? "Скрыть объяснение" : "Что это значит?"}</button>
-      ${progressExplanationOpen ? `<div class="progress-explanation"><p>${strengthInsight(last, previous, sessions)}</p>${last.strengthRetention != null ? `<p class="muted">Сохранение силы: ${formatWeight(last.strengthRetention)}%. Показывает, насколько последний рабочий подход сохранил силу относительно лучшего подхода тренировки.</p>` : ""}</div>` : ""}
+      <button class="ghost explanation-toggle" data-action="toggle-progress-explanation">${et ? progressExplanationOpen ? "Peida selgitus" : "Selgita näitajaid" : progressExplanationOpen ? "Скрыть объяснение" : "Объяснить показатели"}</button>
+      ${progressExplanationOpen ? `
+        <div class="progress-explanation">
+          <div class="explanation-block">
+            <h3>${et ? `Mida tähendab ${formatWeight(last.avgReserve)} RIR?` : `Что означает ${formatWeight(last.avgReserve)} RIR?`}</h3>
+            <p>${et ? `See on viimase treeningu keskmine korduste varu. Pärast iga tööseeriat jäi keskmiselt veel umbes ${Math.floor(last.avgReserve)}–${Math.ceil(last.avgReserve)} võimalikku kordust.` : `Это средний запас повторов в последней тренировке. После каждого рабочего подхода оставалось в среднем ещё примерно ${Math.floor(last.avgReserve)}–${Math.ceil(last.avgReserve)} дополнительных повтора.`}</p>
+            <p>${reserveMeaning} ${et ? "Väiksem RIR ei ole iseenesest parem ega halvem — see näitab ainult suuremat pingutust." : "Меньший RIR сам по себе не лучше и не хуже — он означает только более высокое усилие."}</p>
+          </div>
+          <div class="explanation-block">
+            <h3>${et ? "Kuidas teisi näitajaid arvutatakse?" : "Как считаются остальные показатели?"}</h3>
+            <p><strong>${et ? "Arvestuslik maksimum (e1RM)" : "Расчётный максимум (e1RM)"}</strong> — ${et ? "ühe korduse maksimumi hinnang treeningu parima tööseeria põhjal. See ei ole tegelikult tõstetud maksimum." : "оценка возможного максимума на одно повторение по лучшему рабочему подходу. Это не реально поднятый максимальный вес."}</p>
+            <p><strong>${et ? "Rasked seeriad" : "Тяжёлые подходы"}</strong> — ${et ? "tööseeriad, mille RIR on 0–3." : "рабочие подходы с запасом от 0 до 3 RIR."} <strong>${et ? "Kogumaht" : "Тоннаж"}</strong> — ${et ? "kõigi tööseeriate raskus × kordused; soojendust ei arvestata." : "сумма веса × повторения во всех рабочих подходах; разминка не учитывается."}</p>
+          </div>
+          ${sessions.length === 2 ? `<p class="comparison-caution">${et ? "Ajaloos on praegu ainult kaks treeningut. See võrdlus näitab nende kahe korra erinevust, mitte veel püsivat arengusuunda." : "В истории пока только две тренировки. Сравнение показывает разницу между этими двумя тренировками, но ещё не устойчивую тенденцию."}</p>` : ""}
+        </div>
+      ` : ""}
     </section>
   `;
 }
