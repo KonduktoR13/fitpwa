@@ -387,6 +387,9 @@ const estonianPhrases = [
   ["Повторить последний", "Korda viimast"],
   ["Другие варианты", "Muud variandid"],
   ["Скрыть варианты", "Peida variandid"],
+  ["Коснитесь, чтобы подставить", "Puuduta väärtuste kasutamiseks"],
+  ["Подставить прошлую разминку", "Kasuta eelmist soojendusseeriat"],
+  ["Подставить прошлый рабочий подход", "Kasuta eelmist tööseeriat"],
   ["Лучший прошлый", "Eelmise treeningu parim"],
   ["Прошлая тренировка — нажмите, чтобы подставить", "Eelmine treening — puuduta väärtuste kasutamiseks"],
   ["Прошлой тренировки пока нет.", "Eelmist treeningut veel pole."],
@@ -1513,7 +1516,7 @@ function renderExercise(exerciseId) {
       <div class="${recentComparison.delta == null ? "" : recentComparison.delta >= 0 ? "good" : "bad"}"><span>${recentComparison.label}</span><strong>${recentComparison.value}</strong></div>
     </section>
     ${renderTodayExerciseSwitcher(exerciseId)}
-    ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, allSets, previous)}
+    ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, previous)}
     <section class="panel">
       <div class="section-head"><h2>Подходы сегодня</h2><span>${formatDate(Date.now())}</span></div>
       ${todaySets.length ? `<div class="sets-list today-sets">${todaySets.map((set, index) => isCardioSet(set) ? renderSetRow(set) : renderTodayStrengthSetRow(set, index)).join("")}</div>` : `<p class="muted">Сегодня по этому упражнению ещё нет подходов.</p>`}
@@ -1532,7 +1535,7 @@ function renderTodayExerciseSwitcher(currentExerciseId) {
   }).join("")}</div></section>`;
 }
 
-function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous) {
+function renderStrengthEntry(exercise, editingSet, formValues, previous) {
   const invalid = validateStrengthDraft(formValues);
   const currentReserve = Number(formValues.reserve);
   const visibleRirValues = rirExpanded
@@ -1541,7 +1544,7 @@ function renderStrengthEntry(exercise, editingSet, formValues, allSets, previous
   return `
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
-      ${renderStrengthQuickChips(exercise.id, allSets, previous)}
+      ${renderStrengthQuickChips(exercise.id, previous)}
       <div class="set-type-switch" role="group" aria-label="Тип подхода">
         <button type="button" data-action="set-type" data-warmup="false" class="${formValues.warmup ? "" : "active"}" aria-pressed="${!formValues.warmup}">Рабочий</button>
         <button type="button" data-action="set-type" data-warmup="true" class="${formValues.warmup ? "active" : ""}" aria-pressed="${formValues.warmup}">Разминка</button>
@@ -1620,10 +1623,11 @@ function renderSetComparison(exerciseId, formValues) {
         : `<div class="comparison muted">Прошлых разминочных подходов пока нет. Разминка не влияет на прогресс.</div>`;
     }
     return `
-      <div class="comparison muted">
+      <button class="comparison comparison-action muted" type="button" data-action="apply-set-comparison" data-weight="${target.weight}" data-reps="${target.reps}" data-reserve="${reserveValue(target)}" data-warmup="true" aria-label="Подставить прошлую разминку №${index + 1}">
         <span>Прошлая разминка №${index + 1}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
         <strong>Не влияет на прогресс</strong>
-      </div>
+        <small class="comparison-action-hint">Коснитесь, чтобы подставить&nbsp;›</small>
+      </button>
     `;
   }
   if (!target) {
@@ -1639,10 +1643,11 @@ function renderSetComparison(exerciseId, formValues) {
   const delta = current == null ? null : current - previousScore;
   const direction = delta == null ? "" : delta >= 0 ? "good" : "bad";
   return `
-    <div class="comparison ${direction}">
+    <button class="comparison comparison-action ${direction}" type="button" data-action="apply-set-comparison" data-weight="${target.weight}" data-reps="${target.reps}" data-reserve="${reserveValue(target)}" data-warmup="false" aria-label="Подставить прошлый рабочий подход №${index + 1}">
       <span>Прошлый рабочий №${index + 1}: ${formatWeight(target.weight)} кг × ${target.reps}, ${reserveName(reserveValue(target))}</span>
       <strong>${delta == null ? "Введите вес и повторы" : trendText(current, previousScore)}</strong>
-    </div>
+      <small class="comparison-action-hint">Коснитесь, чтобы подставить&nbsp;›</small>
+    </button>
   `;
 }
 
@@ -1783,12 +1788,10 @@ function renderTodayStrengthSetRow(set, index) {
   `;
 }
 
-function renderStrengthQuickChips(exerciseId, allSets, previous) {
-  const last = allSets.filter((set) => !isCardioSet(set)).at(-1);
+function renderStrengthQuickChips(exerciseId, previous) {
   const previousSets = previousWorkoutSets(exerciseId).filter((set) => !isCardioSet(set));
   return `
-    <div class="quick-actions">
-      ${last ? `<button class="primary-suggestion" type="button" data-action="apply-set-chip" data-weight="${last.weight}" data-reps="${last.reps}" data-reserve="${reserveValue(last)}" data-warmup="${Boolean(last.warmup)}">Повторить последний <strong>${formatWeight(last.weight)} × ${last.reps} · RIR ${reserveValue(last)}</strong></button>` : `<span class="muted">Первый подход этого упражнения</span>`}
+    <div class="quick-actions options-only">
       <button type="button" data-action="toggle-strength-options">${strengthOptionsOpen ? "Скрыть варианты" : "Другие варианты"}</button>
     </div>
     ${strengthOptionsOpen ? `
@@ -1812,6 +1815,33 @@ function renderKeypad() {
       <button type="button" data-action="toggle-keyboard" class="wide-key ${nativeKeyboard ? "active" : ""}">${nativeKeyboard ? "Скрыть клавиатуру" : "Клавиатура"}</button>
     </div>
   `;
+}
+
+function applyStrengthPreset(root, source) {
+  const form = root.querySelector("[data-form='set'][data-kind='strength']");
+  if (!form) return;
+  form.elements.weight.value = source.dataset.weight;
+  form.elements.reps.value = source.dataset.reps;
+  form.elements.reserve.value = source.dataset.reserve;
+  if (source.dataset.warmup != null) form.elements.warmup.checked = source.dataset.warmup === "true";
+  form.querySelectorAll("[data-action='set-type']").forEach((typeButton) => {
+    const active = typeButton.dataset.warmup === String(form.elements.warmup.checked);
+    typeButton.classList.toggle("active", active);
+    typeButton.setAttribute("aria-pressed", String(active));
+  });
+  if (!editingSetId) {
+    draftSet = {
+      ...draftSet,
+      weight: source.dataset.weight,
+      reps: source.dataset.reps,
+      reserve: Number(source.dataset.reserve),
+      warmup: form.elements.warmup.checked
+    };
+  }
+  strengthDraftDirty = false;
+  pendingSuggestionType = null;
+  syncReserveUi(root, Number(source.dataset.reserve));
+  updateStrengthComparison(root);
 }
 
 function renderMiniProgress(exerciseId) {
@@ -2659,6 +2689,11 @@ function bindEvents(root) {
       keypadOpen = false;
       render();
     }
+    const comparison = event.target.closest("[data-action='apply-set-comparison']");
+    if (comparison) {
+      haptic(10);
+      applyStrengthPreset(root, comparison);
+    }
   });
   root.querySelectorAll("[data-action='home']").forEach((button) => button.addEventListener("click", () => setRoute({ name: "home" })));
   root.querySelectorAll("[data-action='app-back']").forEach((button) => button.addEventListener("click", () => window.history.back()));
@@ -2880,21 +2915,7 @@ function bindEvents(root) {
     draftCardio[input.name] = input.value;
   }));
   root.querySelectorAll("[data-action='repeat-last'], [data-action='repeat-best'], [data-action='apply-set-chip']").forEach((button) => button.addEventListener("click", () => {
-    const form = root.querySelector("[data-form='set']");
-    form.elements.weight.value = button.dataset.weight;
-    form.elements.reps.value = button.dataset.reps;
-    form.elements.reserve.value = button.dataset.reserve;
-    if (form.elements.warmup && button.dataset.warmup != null) form.elements.warmup.checked = button.dataset.warmup === "true";
-    form.querySelectorAll("[data-action='set-type']").forEach((typeButton) => {
-      const active = typeButton.dataset.warmup === String(form.elements.warmup?.checked || false);
-      typeButton.classList.toggle("active", active);
-      typeButton.setAttribute("aria-pressed", String(active));
-    });
-    draftSet = { ...draftSet, weight: button.dataset.weight, reps: button.dataset.reps, reserve: Number(button.dataset.reserve), warmup: form.elements.warmup?.checked || false };
-    strengthDraftDirty = false;
-    pendingSuggestionType = null;
-    syncReserveUi(root, draftSet.reserve);
-    updateStrengthComparison(root);
+    applyStrengthPreset(root, button);
   }));
   root.querySelectorAll("[data-action='use-set']").forEach((row) => row.addEventListener("click", () => {
     const set = state.sets.find((item) => item.id === row.dataset.id);
