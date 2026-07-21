@@ -3,6 +3,7 @@ import "./styles.css";
 const STORAGE_KEY = "training-log-pwa-state-v1";
 const LANGUAGE_KEY = "training-log-pwa-language";
 const DATA_VERSION = 6;
+const UNDO_DURATION_MS = 5000;
 let currentLanguage = localStorage.getItem(LANGUAGE_KEY) === "ru" ? "ru" : "et";
 
 // The application predates i18n and its Russian copy is embedded in the render
@@ -523,6 +524,7 @@ let settingsTechnicalOpen = false;
 let progressExplanationOpen = false;
 let draftNote = "";
 let undoRecord = null;
+let undoTimer = null;
 let restTimerEnd = null;
 let restTimerTick = null;
 const exerciseDrafts = new Map();
@@ -1178,6 +1180,22 @@ function notify(text, tone = "") {
     toast = null;
     render();
   }, 1800);
+}
+
+function showUndo(record) {
+  undoRecord = record;
+  window.clearTimeout(undoTimer);
+  undoTimer = window.setTimeout(() => {
+    undoRecord = null;
+    undoTimer = null;
+    render();
+  }, UNDO_DURATION_MS);
+}
+
+function clearUndo() {
+  window.clearTimeout(undoTimer);
+  undoTimer = null;
+  undoRecord = null;
 }
 
 function restTimerSecondsLeft() {
@@ -3094,7 +3112,7 @@ function saveSet(event) {
       lastTouchedSetId = existing.id;
       finishSetEditing();
       notify("Кардио изменено", "success");
-      undoRecord = { kind: "restore", snapshot: previousSnapshot, message: "Кардио изменено" };
+      showUndo({ kind: "restore", snapshot: previousSnapshot, message: "Кардио изменено" });
     } else {
       const id = uid();
       state.sets.push({
@@ -3110,7 +3128,7 @@ function saveSet(event) {
       lastTouchedSetId = id;
       draftCardio = { minutes: String(minutes), seconds: String(seconds), distanceM: String(Math.round(distanceM)), setting };
       draftNote = "";
-      undoRecord = { kind: "delete", setId: id, message: "Кардио записано" };
+      showUndo({ kind: "delete", setId: id, message: "Кардио записано" });
       notify("Кардио записано", "success");
     }
     haptic([12, 30, 12]);
@@ -3149,7 +3167,7 @@ function saveSet(event) {
     pendingSuggestionType = null;
     keypadOpen = false;
     notify("Подход изменён", "success");
-    undoRecord = { kind: "restore", snapshot: previousSnapshot, message: "Подход изменён" };
+    showUndo({ kind: "restore", snapshot: previousSnapshot, message: "Подход изменён" });
   } else {
     const id = uid();
     state.sets.push({
@@ -3170,7 +3188,7 @@ function saveSet(event) {
     keypadOpen = false;
     draftNote = "";
     notify(warmup ? "Разминка записана" : "Подход записан", "success");
-    undoRecord = { kind: "delete", setId: id, message: warmup ? "Разминка записана" : "Подход записан" };
+    showUndo({ kind: "delete", setId: id, message: warmup ? "Разминка записана" : "Подход записан" });
   }
   haptic([12, 30, 12]);
   formError = "";
@@ -3181,21 +3199,22 @@ function saveSet(event) {
 
 function undoLastChange() {
   if (!undoRecord) return;
-  if (undoRecord.kind === "delete") {
-    state.sets = state.sets.filter((set) => set.id !== undoRecord.setId);
+  const record = undoRecord;
+  clearUndo();
+  if (record.kind === "delete") {
+    state.sets = state.sets.filter((set) => set.id !== record.setId);
     window.clearInterval(restTimerTick);
     restTimerTick = null;
     restTimerEnd = null;
   }
-  if (undoRecord.kind === "restore" && undoRecord.snapshot) {
-    const index = state.sets.findIndex((set) => set.id === undoRecord.snapshot.id);
-    if (index >= 0) state.sets[index] = undoRecord.snapshot;
+  if (record.kind === "restore" && record.snapshot) {
+    const index = state.sets.findIndex((set) => set.id === record.snapshot.id);
+    if (index >= 0) state.sets[index] = record.snapshot;
   }
-  if (undoRecord.kind === "insert" && undoRecord.snapshot) {
-    const index = Math.max(0, Math.min(Number(undoRecord.index) || 0, state.sets.length));
-    state.sets.splice(index, 0, undoRecord.snapshot);
+  if (record.kind === "insert" && record.snapshot) {
+    const index = Math.max(0, Math.min(Number(record.index) || 0, state.sets.length));
+    state.sets.splice(index, 0, record.snapshot);
   }
-  undoRecord = null;
   saveState();
   notify("Последнее действие отменено");
   render();
@@ -3207,7 +3226,7 @@ function deleteSet(id) {
   if (index < 0) return;
   const snapshot = { ...state.sets[index] };
   state.sets.splice(index, 1);
-  undoRecord = { kind: "insert", snapshot, index, message: "Запись удалена" };
+  showUndo({ kind: "insert", snapshot, index, message: "Запись удалена" });
   if (editingSetId === id) finishSetEditing();
   saveState();
   haptic(20);
