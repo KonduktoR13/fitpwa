@@ -411,7 +411,7 @@ const estonianPhrases = [
   ["Язык", "Keel"],
   ["Текущий язык приложения", "Rakenduse praegune keel"],
   ["Таймер отдыха", "Puhkuse taimer"],
-  ["Запускается после рабочего подхода", "Käivitub pärast tööseeriat"],
+  ["Запускается после каждого силового подхода", "Käivitub pärast iga jõuseeriat"],
   ["Длительность отдыха", "Puhkuse kestus"],
   ["О приложении", "Rakendusest"],
   ["Хранилище, PWA и технические данные", "Salvestusruum, PWA ja tehnilised andmed"],
@@ -2620,7 +2620,7 @@ function renderSettings() {
     </section>
     <section class="panel preference-list">
       <div class="preference-row"><div><strong>Язык</strong><span>Текущий язык приложения</span></div><button data-action="language">${currentLanguage.toUpperCase()}</button></div>
-      <div class="preference-row"><div><strong>Таймер отдыха</strong><span>Запускается после рабочего подхода</span></div><label class="switch"><input type="checkbox" data-setting="rest-timer" ${state.settings.restTimerEnabled ? "checked" : ""} /><span></span></label></div>
+      <div class="preference-row"><div><strong>Таймер отдыха</strong><span>Запускается после каждого силового подхода</span></div><label class="switch"><input type="checkbox" data-setting="rest-timer" ${state.settings.restTimerEnabled ? "checked" : ""} /><span></span></label></div>
       ${state.settings.restTimerEnabled ? `<label class="timer-duration">Длительность отдыха<select data-setting="rest-seconds">${[60, 90, 120, 180].map((seconds) => `<option value="${seconds}" ${Number(state.settings.restTimerSeconds) === seconds ? "selected" : ""}>${seconds} сек</option>`).join("")}</select></label>` : ""}
     </section>
     <section class="panel">
@@ -3193,7 +3193,7 @@ function saveSet(event) {
   haptic([12, 30, 12]);
   formError = "";
   saveState();
-  if (!warmup) startRestTimer();
+  if (!existing) startRestTimer();
   render();
 }
 
