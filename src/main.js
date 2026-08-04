@@ -395,6 +395,9 @@ const estonianPhrases = [
   ["Прошлой тренировки пока нет.", "Eelmist treeningut veel pole."],
   ["Скрыть 6–10", "Peida 6–10"],
   ["Что такое RIR?", "Mis on RIR?"],
+  ["повторов в запасе", "kordust varuks"],
+  ["Рабочие подходы прошлой тренировки", "Eelmise treeningu tööseeriad"],
+  ["Прошлая тренировка", "Eelmine treening"],
   ["Сколько повторений можно было бы сделать дополнительно. 0 — отказ, 3 — осталось примерно три повтора.", "Mitu kordust oleksid suutnud veel teha. 0 — suutlikkuse piir, 3 — varuks jäi umbes kolm kordust."],
   ["Заметка", "Märkus"],
   ["необязательно", "valikuline"],
@@ -520,7 +523,6 @@ let chartTooltip = null;
 let toast = null;
 let toastTimer = null;
 let strengthOptionsOpen = false;
-let rirExpanded = false;
 let rirHelpOpen = false;
 let historyCalendarOpen = false;
 let settingsTechnicalOpen = false;
@@ -1537,10 +1539,6 @@ function renderTodayExerciseSwitcher(currentExerciseId) {
 
 function renderStrengthEntry(exercise, editingSet, formValues, previous) {
   const invalid = validateStrengthDraft(formValues);
-  const currentReserve = Number(formValues.reserve);
-  const visibleRirValues = rirExpanded
-    ? Array.from({ length: 11 }, (_, value) => value)
-    : [...new Set([0, 1, 2, 3, 4, 5, ...(currentReserve > 5 ? [currentReserve] : [])])];
   return `
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
@@ -1555,18 +1553,29 @@ function renderStrengthEntry(exercise, editingSet, formValues, previous) {
         <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="${nativeKeyboard ? "numeric" : "none"}" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
       </div>
       ${keypadOpen ? renderKeypad() : ""}
-      <label class="effort-label"><span><button class="inline-help" type="button" data-action="toggle-rir-help">RIR <small>?</small></button><strong id="reserveText">${formValues.reserve} · ${reserveName(formValues.reserve)}</strong></span><input class="effort-slider" type="range" name="reserve" min="0" max="10" value="${formValues.reserve}" /></label>
-      ${rirHelpOpen ? `<div class="context-help"><strong>Что такое RIR?</strong><span>Сколько повторений можно было бы сделать дополнительно. 0 — отказ, 3 — осталось примерно три повтора.</span></div>` : ""}
-      <div class="rir-chips">
-        ${visibleRirValues.map((value) => `<button type="button" data-action="set-reserve-only" data-reserve="${value}" aria-pressed="${Number(formValues.reserve) === value}" class="${Number(formValues.reserve) === value ? "active" : ""}">${value === 0 ? "0 отказ" : value}</button>`).join("")}
-        ${rirExpanded ? `<button type="button" data-action="toggle-rir-values">Скрыть 6–10</button>` : `<button type="button" data-action="toggle-rir-values">6–10</button>`}
+      <div class="rir-select-row">
+        <label class="rir-select"><span><strong>RIR</strong><small>повторов в запасе</small></span><select name="reserve" aria-label="RIR — повторов в запасе">${Array.from({ length: 11 }, (_, value) => `<option value="${value}" ${Number(formValues.reserve) === value ? "selected" : ""}>${value} — ${value === 0 ? "отказ" : "в запасе"}</option>`).join("")}</select></label>
+        <button class="inline-help rir-help-toggle" type="button" data-action="toggle-rir-help" aria-label="Что такое RIR?" aria-expanded="${rirHelpOpen}">?</button>
       </div>
+      ${rirHelpOpen ? `<div class="context-help"><strong>Что такое RIR?</strong><span>Сколько повторений можно было бы сделать дополнительно. 0 — отказ, 3 — осталось примерно три повтора.</span></div>` : ""}
+      ${renderPreviousWorkReference(exercise.id)}
       <p class="muted warmup-note">${formValues.warmup ? "Разминка не влияет на прогресс." : "Рабочий подход влияет на прогресс."}</p>
       ${renderSetComparison(exercise.id, formValues)}
       <label class="set-note">Заметка <span>необязательно</span><textarea name="note" rows="2" placeholder="Например: техника, самочувствие, высота сиденья">${formValues.note || ""}</textarea></label>
       ${formError || invalid ? `<p class="form-error">${formError || invalid}</p>` : ""}
       <button class="primary save-set" type="submit" ${invalid ? "disabled" : ""}>${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
     </form>
+  `;
+}
+
+function renderPreviousWorkReference(exerciseId) {
+  const sets = previousStrengthSets(exerciseId, false);
+  if (!sets.length) return "";
+  return `
+    <aside class="previous-work-reference" aria-label="Рабочие подходы прошлой тренировки">
+      <div class="previous-work-reference-head"><strong>Прошлая тренировка</strong><span>${sets.length} раб.</span></div>
+      <ol>${sets.map((set, index) => `<li><small>№${index + 1}</small><strong>${formatWeight(set.weight)} × ${set.reps}</strong><span>RIR ${reserveValue(set)}</span></li>`).join("")}</ol>
+    </aside>
   `;
 }
 
@@ -1679,13 +1688,6 @@ function syncReserveUi(root, reserve) {
   const form = root.querySelector("[data-form='set'][data-kind='strength']");
   if (!form) return;
   if (form.elements.reserve) form.elements.reserve.value = value;
-  root.querySelectorAll(".rir-chips [data-reserve]").forEach((button) => {
-    const active = Number(button.dataset.reserve) === value;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-  const reserveText = root.querySelector("#reserveText");
-  if (reserveText) reserveText.textContent = localizeText(reserveName(value));
 }
 
 function finishSetEditing() {
@@ -2766,12 +2768,6 @@ function bindEvents(root) {
     rirHelpOpen = !rirHelpOpen;
     render();
   });
-  root.querySelector("[data-action='toggle-rir-values']")?.addEventListener("click", () => {
-    const form = root.querySelector("[data-form='set'][data-kind='strength']");
-    if (form && !editingSetId) rememberStrengthForm(form);
-    rirExpanded = !rirExpanded;
-    render();
-  });
   root.querySelectorAll("[data-action='set-type']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='strength']");
     if (!form) return;
@@ -2786,12 +2782,11 @@ function bindEvents(root) {
   root.querySelectorAll("[name='note']").forEach((input) => input.addEventListener("input", () => {
     if (!editingSetId) draftNote = input.value;
   }));
-  root.querySelector("[name='reserve']")?.addEventListener("input", (event) => {
+  root.querySelector("[name='reserve']")?.addEventListener("change", (event) => {
     if (!editingSetId) draftSet.reserve = Number(event.target.value);
     strengthDraftDirty = true;
     pendingSuggestionType = null;
     syncReserveUi(root, Number(event.target.value));
-    event.target.style.setProperty("--thumb-color", reserveColor(Number(event.target.value)));
     updateStrengthComparison(root);
   });
   root.querySelector("[name='warmup']")?.addEventListener("change", (event) => {
@@ -2862,31 +2857,6 @@ function bindEvents(root) {
     render();
     window.setTimeout(() => document.querySelector(`[data-set-field='${activeSetField}']`)?.focus(), 30);
   });
-  root.querySelectorAll("[data-action='set-reserve']").forEach((button) => button.addEventListener("click", () => {
-    const form = root.querySelector("[data-form='set']");
-    const reserve = Number(button.dataset.reserve);
-    if (!form) return;
-    form.elements.reserve.value = reserve;
-    form.elements.warmup.checked = reserve >= 6;
-    if (!editingSetId) {
-      draftSet.reserve = reserve;
-      draftSet.warmup = reserve >= 6;
-    }
-    syncReserveUi(root, reserve);
-    applySuggestedStrengthValues(root);
-    updateStrengthComparison(root);
-  }));
-  root.querySelectorAll("[data-action='set-reserve-only']").forEach((button) => button.addEventListener("click", () => {
-    const form = root.querySelector("[data-form='set'][data-kind='strength']");
-    const reserve = Number(button.dataset.reserve);
-    if (!form) return;
-    form.elements.reserve.value = reserve;
-    if (!editingSetId) draftSet.reserve = reserve;
-    strengthDraftDirty = true;
-    pendingSuggestionType = null;
-    syncReserveUi(root, reserve);
-    updateStrengthComparison(root);
-  }));
   root.querySelectorAll("[data-action='cardio-duration']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='cardio']");
     if (!form) return;
@@ -3022,7 +2992,6 @@ function bindHomeCatalogEvents(scope) {
     pendingSuggestionType = null;
     keypadOpen = false;
     strengthOptionsOpen = false;
-    rirExpanded = false;
     rirHelpOpen = false;
     formError = "";
     setRoute({ name: "exercise", id: card.dataset.openExercise });
