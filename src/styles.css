@@ -1162,11 +1162,13 @@ h3 {
 }
 
 .rir-help-toggle {
+  justify-content: center;
   width: 42px;
   min-height: 46px;
   border-radius: 12px;
   padding: 0;
   font-size: 1rem;
+  line-height: 1;
 }
 
 .comparison {
