@@ -560,9 +560,20 @@ h3 {
 }
 
 .set-type-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 0;
   background: transparent;
   font-weight: 800;
+}
+
+.set-type-switch button small {
+  color: currentColor;
+  font-size: 0.75rem;
+  opacity: 0.72;
+  white-space: nowrap;
 }
 
 .set-type-switch button.active {
@@ -1536,6 +1547,7 @@ h3 {
   gap: 10px;
   overflow-x: auto;
   padding: 8px 0 12px;
+  scroll-snap-type: x proximity;
   scrollbar-width: thin;
 }
 
@@ -1546,6 +1558,7 @@ h3 {
   min-height: 88px;
   align-content: start;
   padding: 12px;
+  scroll-snap-align: start;
   text-align: left;
 }
 
@@ -1965,13 +1978,25 @@ h3 {
   .exercise-card,
   .compact-progress-card,
   .progress-hero,
-  .progress-mosaic,
   .chart-grid,
   .input-pair,
   .insight-grid,
   .session-summary,
   .mini-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .progress-mosaic {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-tile {
+    min-height: 108px;
+    padding: 12px;
+  }
+
+  .metric-tile strong {
+    font-size: 1.65rem;
   }
 
   .hero {

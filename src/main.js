@@ -135,6 +135,7 @@ const estonianPhrases = [
   ["Без разминки.", "Ilma soojenduseta."],
   ["Тоннаж", "Kogumaht"],
   ["Производительность", "Sooritus"],
+  ["Индекс", "Indeks"],
   ["производительность", "sooritus"],
   ["Дистанция", "Distants"],
   ["дистанция", "distants"],
@@ -311,6 +312,7 @@ const estonianPhrases = [
   ["e1RM не считается: reps+RIR > 15", "e1RM-i ei arvutata: reps+RIR > 15"],
   ["e1RM не считается: reps + RIR > 15", "e1RM-i ei arvutata: reps + RIR > 15"],
   ["e1RM не считается: reps+RIR &gt; 15", "e1RM-i ei arvutata: reps+RIR &gt; 15"],
+  ["№", "nr "],
   ["Запишите хотя бы один подход.", "Salvesta vähemalt üks seeria."],
   ["Подробнее", "Vaata lähemalt"],
   ["Тренд считается по истории упражнения.", "Trend arvutatakse harjutuse ajaloo põhjal."],
@@ -1137,11 +1139,9 @@ function suggestedDraftSet(exerciseId, fallback = {}) {
   const previousAny = previousSession
     .filter((set) => !isCardioSet(set))
     .sort((a, b) => a.createdAt - b.createdAt);
-  const target = previousSameType[todaySameType.length] ||
-    todaySameType.at(-1) ||
-    previousSameType[0] ||
-    previousAny.at(-1) ||
-    null;
+  const target = warmup
+    ? previousSameType[todaySameType.length] || todaySameType.at(-1) || previousSameType[0] || previousAny.at(-1) || null
+    : todaySameType.at(-1) || previousSameType[0] || previousAny.at(-1) || null;
   return {
     weight: target ? String(target.weight) : fallback.weight || "",
     reps: target ? String(target.reps) : fallback.reps || "8",
@@ -1276,6 +1276,14 @@ function render() {
   localizeUi(app);
   bindEvents(app);
   drawCharts();
+  alignActiveProgressPicker();
+}
+
+function alignActiveProgressPicker() {
+  const picker = document.querySelector(".progress-picker");
+  const active = picker?.querySelector("button.active");
+  if (!picker || !active) return;
+  picker.scrollLeft = Math.max(0, active.offsetLeft - picker.offsetLeft - 8);
 }
 
 function renderRoute() {
@@ -1539,13 +1547,15 @@ function renderTodayExerciseSwitcher(currentExerciseId) {
 
 function renderStrengthEntry(exercise, editingSet, formValues, previous) {
   const invalid = validateStrengthDraft(formValues);
+  const workNumber = strengthSetNumber(exercise.id, false, editingSet);
+  const warmupNumber = strengthSetNumber(exercise.id, true, editingSet);
   return `
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
       ${renderStrengthQuickChips(exercise.id, previous)}
       <div class="set-type-switch" role="group" aria-label="Тип подхода">
-        <button type="button" data-action="set-type" data-warmup="false" class="${formValues.warmup ? "" : "active"}" aria-pressed="${!formValues.warmup}">Рабочий</button>
-        <button type="button" data-action="set-type" data-warmup="true" class="${formValues.warmup ? "active" : ""}" aria-pressed="${formValues.warmup}">Разминка</button>
+        <button type="button" data-action="set-type" data-warmup="false" class="${formValues.warmup ? "" : "active"}" aria-pressed="${!formValues.warmup}"><span>Рабочий</span><small>№${workNumber}</small></button>
+        <button type="button" data-action="set-type" data-warmup="true" class="${formValues.warmup ? "active" : ""}" aria-pressed="${formValues.warmup}"><span>Разминка</span><small>№${warmupNumber}</small></button>
         <input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} hidden />
       </div>
       <div class="input-pair">
@@ -1566,6 +1576,15 @@ function renderStrengthEntry(exercise, editingSet, formValues, previous) {
       <button class="primary save-set" type="submit" ${invalid ? "disabled" : ""}>${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
     </form>
   `;
+}
+
+function strengthSetNumber(exerciseId, warmup, editingSet) {
+  const sets = todayStrengthSets(exerciseId, warmup);
+  if (editingSet && Boolean(editingSet.warmup) === warmup) {
+    const index = sets.findIndex((set) => set.id === editingSet.id);
+    if (index >= 0) return index + 1;
+  }
+  return sets.length + 1;
 }
 
 function renderPreviousWorkReference(exerciseId) {
@@ -2104,6 +2123,13 @@ function renderStrengthSessionSummary(session) {
   `;
 }
 
+function selectedProgressFirst(tracked, selectedId) {
+  return [
+    ...tracked.filter(({ exercise }) => exercise.id === selectedId),
+    ...tracked.filter(({ exercise }) => exercise.id !== selectedId)
+  ];
+}
+
 function renderStrengthProgress(selected, tracked) {
   const sessions = progressForExercise(selected.id);
   const last = sessions.at(-1);
@@ -2141,7 +2167,7 @@ function renderStrengthProgress(selected, tracked) {
     <section class="progress-picker-shell">
       <div class="section-head"><h2>Выбор упражнения</h2><span class="legend-dot">${tracked.length} с историей</span></div>
       <div class="progress-picker">
-        ${tracked.map(({ exercise, sessions: itemSessions }) => {
+        ${selectedProgressFirst(tracked, selected.id).map(({ exercise, sessions: itemSessions }) => {
           const itemLast = itemSessions.at(-1);
           const itemPrev = itemSessions.at(-2);
           return `
@@ -2256,7 +2282,7 @@ function rowingChartConfig(tab, sessions) {
 
 function renderRowingChartTabs(active) {
   const tabs = [
-    ["performance", "Производительность"],
+    ["performance", "Индекс"],
     ["pace", "Темп"],
     ["distance", "Дистанция"],
     ["projected3000", "3000 м"]
@@ -2323,7 +2349,7 @@ function renderRowingProgress(selected, tracked) {
     <section class="progress-picker-shell">
       <div class="section-head"><h2>Выбор упражнения</h2><span class="legend-dot">${tracked.length} с историей</span></div>
       <div class="progress-picker">
-        ${tracked.map(({ exercise, sessions: itemSessions }) => {
+        ${selectedProgressFirst(tracked, selected.id).map(({ exercise, sessions: itemSessions }) => {
           const itemLast = itemSessions.at(-1);
           const itemPrev = itemSessions.at(-2);
           const itemDelta = itemLast && itemPrev ? itemLast.score - itemPrev.score : null;
@@ -2771,11 +2797,12 @@ function bindEvents(root) {
   root.querySelectorAll("[data-action='set-type']").forEach((button) => button.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='strength']");
     if (!form) return;
-    if (!editingSetId) rememberStrengthForm(form);
     const warmup = button.dataset.warmup === "true";
-    form.elements.warmup.checked = warmup;
-    draftSet.warmup = warmup;
-    strengthDraftDirty = true;
+    if (!editingSetId) {
+      draftNote = form.elements.note?.value || "";
+      draftSet = suggestedDraftSet(form.dataset.id, { warmup });
+      strengthDraftDirty = false;
+    }
     pendingSuggestionType = null;
     render();
   }));
@@ -3412,11 +3439,29 @@ function drawChart(ctx, width, height, values, labels, type, invert = false, poi
     });
   }
   ctx.fillStyle = muted;
-  labels.forEach((label, index) => {
-    if (index !== 0 && index !== labels.length - 1 && index % Math.ceil(labels.length / 4) !== 0) return;
-    const x = pad.l + (chartW * index) / Math.max(1, labels.length - 1);
+  const labelStep = Math.ceil(labels.length / 4);
+  const labelItems = labels
+    .map((label, index) => {
+      if (index !== 0 && index !== labels.length - 1 && index % labelStep !== 0) return null;
+      const x = clampChartPoint(pad.l + (chartW * index) / Math.max(1, labels.length - 1), pad.l, pad.l + chartW);
+      const textWidth = ctx.measureText(label).width;
+      const left = index === 0 ? x : index === labels.length - 1 ? x - textWidth : x - textWidth / 2;
+      const right = index === 0 ? x + textWidth : index === labels.length - 1 ? x : x + textWidth / 2;
+      return { label, index, x, left, right };
+    })
+    .filter(Boolean);
+  const visibleLabels = [];
+  labelItems.forEach((item) => {
+    if (item.index === labels.length - 1) {
+      while (visibleLabels.length > 1 && item.left < visibleLabels.at(-1).right + 10) visibleLabels.pop();
+      visibleLabels.push(item);
+      return;
+    }
+    if (!visibleLabels.length || item.left >= visibleLabels.at(-1).right + 10) visibleLabels.push(item);
+  });
+  visibleLabels.forEach(({ label, index, x }) => {
     ctx.textAlign = index === 0 ? "left" : index === labels.length - 1 ? "right" : "center";
-    ctx.fillText(label, clampChartPoint(x, pad.l, pad.l + chartW), height - 10);
+    ctx.fillText(label, x, height - 10);
   });
   ctx.textAlign = "left";
 }
