@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "vite --host 0.0.0.0",
+    "test": "node --test tests/*.test.js",
     "build": "vite build --base=./",
     "preview": "vite preview --host 0.0.0.0",
     "deploy": "bash scripts/deploy-pages.sh"

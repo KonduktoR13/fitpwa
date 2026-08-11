@@ -3047,3 +3047,166 @@ h1 {
     animation: none !important;
   }
 }
+
+.coach-entry-actions {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.coach-entry-actions.options-only {
+  justify-content: flex-end;
+}
+
+.coach-entry-actions .coach-button {
+  border-color: color-mix(in srgb, var(--primary) 52%, var(--line));
+  color: #efbd96;
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+}
+
+.coach-entry-actions > button:last-child {
+  min-height: 46px;
+}
+
+.coach-form-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.coach-form-fields legend {
+  padding-inline: 5px;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.coach-form-fields small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.coach-backdrop {
+  z-index: 60;
+  padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+}
+
+.coach-sheet {
+  display: grid;
+  gap: 14px;
+  width: min(520px, 100%);
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.coach-sheet-head,
+.coach-actions,
+.coach-confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.coach-sheet-head {
+  justify-content: space-between;
+}
+
+.coach-sheet-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.coach-sheet-head span,
+.coach-confidence span,
+.coach-confidence small {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.coach-sheet-head > button {
+  min-width: 44px;
+  padding: 0;
+  font-size: 1.35rem;
+}
+
+.coach-prescription {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--primary) 52%, var(--line));
+  border-radius: 16px;
+  padding: 15px;
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface-2));
+}
+
+.coach-prescription strong {
+  color: #f4c8a5;
+  font-size: clamp(1.45rem, 7vw, 2rem);
+}
+
+.coach-prescription span {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.coach-explanation {
+  line-height: 1.45;
+}
+
+.coach-confidence {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding-block: 10px;
+}
+
+.coach-confidence small {
+  flex-basis: 100%;
+}
+
+.coach-safety,
+.coach-finish-hint {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.coach-finish-hint {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+}
+
+.coach-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 520px) {
+  .coach-form-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .coach-form-fields small {
+    grid-column: 1;
+  }
+
+  .coach-entry-actions {
+    display: flex;
+  }
+
+  .coach-entry-actions button {
+    min-width: 0;
+    padding-inline: 11px;
+    white-space: nowrap;
+  }
+
+  .coach-sheet {
+    max-height: calc(100dvh - 20px - env(safe-area-inset-bottom));
+    padding: 16px;
+  }
+}

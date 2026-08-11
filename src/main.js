@@ -1,8 +1,11 @@
 import "./styles.css";
+import { recommendNextSet } from "./coach/engine.js";
+import { buildCoachContext, coachSupported, defaultWeightIncrement, exerciseCoachDefaults } from "./coach/context.js";
+import { formatCoachRecommendation } from "./coach/messages.js";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
 const LANGUAGE_KEY = "training-log-pwa-language";
-const DATA_VERSION = 6;
+const DATA_VERSION = 7;
 const UNDO_DURATION_MS = 5000;
 let currentLanguage = localStorage.getItem(LANGUAGE_KEY) === "ru" ? "ru" : "et";
 
@@ -388,6 +391,12 @@ const estonianPhrases = [
   ["Первый подход этого упражнения", "Selle harjutuse esimene seeria"],
   ["Повторить последний", "Korda viimast"],
   ["Другие варианты", "Muud variandid"],
+  ["Тренер", "Treener"],
+  ["Настройки тренера", "Treeneri seaded"],
+  ["Минимальный шаг веса, кг", "Väikseim raskuse samm, kg"],
+  ["Нижняя граница повторений", "Korduste alumine piir"],
+  ["Верхняя граница повторений", "Korduste ülemine piir"],
+  ["Используется только для локальных рекомендаций силовых подходов.", "Kasutatakse ainult jõuseeriate kohalike soovituste jaoks."],
   ["Скрыть варианты", "Peida variandid"],
   ["Коснитесь, чтобы подставить", "Puuduta väärtuste kasutamiseks"],
   ["Подставить прошлую разминку", "Kasuta eelmist soojendusseeriat"],
@@ -525,6 +534,8 @@ let chartTooltip = null;
 let toast = null;
 let toastTimer = null;
 let strengthOptionsOpen = false;
+let coachSheetOpen = false;
+let coachRecommendation = null;
 let rirHelpOpen = false;
 let historyCalendarOpen = false;
 let settingsTechnicalOpen = false;
@@ -578,6 +589,7 @@ function migrateState(input) {
     settings: { unit: "кг", autoUpdateCheck: true, language: currentLanguage, favoriteExerciseIds: [], restTimerEnabled: false, restTimerSeconds: 90 },
     ...input
   };
+  migrated.schemaVersion = DATA_VERSION;
   migrated.settings = { unit: "кг", autoUpdateCheck: true, language: currentLanguage, favoriteExerciseIds: [], restTimerEnabled: false, restTimerSeconds: 90, ...(input.settings || {}) };
   migrated.settings.favoriteExerciseIds = Array.isArray(migrated.settings.favoriteExerciseIds) ? migrated.settings.favoriteExerciseIds : [];
   migrated.settings.restTimerSeconds = Math.max(15, Math.min(600, Number(migrated.settings.restTimerSeconds) || 90));
@@ -592,6 +604,12 @@ function migrateState(input) {
     equipmentType: exercise.equipmentType || "other",
     icon: exercise.icon || "🏋️",
     image: exercise.image || "",
+    weightIncrement: Math.max(0.25, Number(exercise.weightIncrement) || defaultWeightIncrement(exercise.equipmentType || "other")),
+    coachRepMin: Math.max(1, Math.round(Number(exercise.coachRepMin) || 8)),
+    coachRepMax: Math.max(
+      Math.max(1, Math.round(Number(exercise.coachRepMin) || 8)),
+      Math.round(Number(exercise.coachRepMax) || 12)
+    ),
     createdAt: exercise.createdAt || Date.now()
   }));
   if (!migrated.exercises.some((exercise) => isRowingExercise(exercise))) {
@@ -602,6 +620,9 @@ function migrateState(input) {
       equipmentType: "cardio",
       icon: "🚣",
       image: "",
+      weightIncrement: defaultWeightIncrement("cardio"),
+      coachRepMin: 8,
+      coachRepMax: 12,
       createdAt: Date.now()
     });
   }
@@ -708,6 +729,8 @@ function setRoute(next, { historyMode = "push", scrollY = 0 } = {}) {
     keypadOpen = false;
     formError = "";
     strengthOptionsOpen = false;
+    coachSheetOpen = false;
+    coachRecommendation = null;
     rirHelpOpen = false;
   }
   if (historyMode !== "none") {
@@ -1261,6 +1284,7 @@ function render() {
       </header>
       <main class="${transitionClass}">${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
+      ${coachSheetOpen && coachRecommendation ? renderCoachSheet() : ""}
       ${toast && !undoRecord ? `<div class="toast ${toast.tone || ""}">${toast.text}</div>` : ""}
       ${undoRecord ? `<div class="undo-bar"><span class="undo-message"><i aria-hidden="true">${undoRecord.kind === "insert" ? "↶" : "✓"}</i>${undoRecord.message}</span><button type="button" data-action="undo-last">Отменить</button></div>` : ""}
       ${restTimerEnd ? renderRestTimer() : ""}
@@ -1436,6 +1460,8 @@ function renderExerciseCard(exercise) {
 }
 
 function renderExerciseForm(exercise = null) {
+  const coachDefaults = exerciseCoachDefaults(exercise || { equipmentType: "barbell" });
+  const showCoachSettings = !exercise || coachSupported(exercise);
   return `
     <form class="panel exercise-form" data-form="exercise" ${exercise ? `data-id="${exercise.id}"` : ""}>
       <h2>${exercise ? "Редактировать упражнение" : "Новое упражнение"}</h2>
@@ -1444,6 +1470,15 @@ function renderExerciseForm(exercise = null) {
         <label>Иконка<input name="icon" maxlength="4" value="${exercise?.icon || "🏋️"}" /></label>
         <label>Группа<select name="category">${categories.map(([k, v]) => `<option value="${k}" ${exercise?.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
         <label>Оборудование<select name="equipmentType">${equipment.map(([k, v]) => `<option value="${k}" ${exercise?.equipmentType === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+        ${showCoachSettings ? `
+          <fieldset class="wide coach-form-fields">
+            <legend>Настройки тренера</legend>
+            <label>Минимальный шаг веса, кг<input name="weightIncrement" type="number" inputmode="decimal" min="0.25" step="0.25" required value="${coachDefaults.increment}" /></label>
+            <label>Нижняя граница повторений<input name="coachRepMin" type="number" inputmode="numeric" min="1" max="99" required value="${coachDefaults.repMin}" /></label>
+            <label>Верхняя граница повторений<input name="coachRepMax" type="number" inputmode="numeric" min="1" max="100" required value="${coachDefaults.repMax}" /></label>
+            <small>Используется только для локальных рекомендаций силовых подходов.</small>
+          </fieldset>
+        ` : ""}
         <label class="wide">Своя картинка<span class="file-picker"><span class="file-picker-text">Выбрать файл</span><input type="file" name="image" accept="image/*" data-image-input /></span></label>
       </div>
       <div class="actions">
@@ -1549,17 +1584,18 @@ function renderStrengthEntry(exercise, editingSet, formValues, previous) {
   const invalid = validateStrengthDraft(formValues);
   const workNumber = strengthSetNumber(exercise.id, false, editingSet);
   const warmupNumber = strengthSetNumber(exercise.id, true, editingSet);
+  const weightIncrement = exerciseCoachDefaults(exercise).increment;
   return `
     <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
-      ${renderStrengthQuickChips(exercise.id, previous)}
+      ${renderStrengthQuickChips(exercise.id, previous, Boolean(editingSet))}
       <div class="set-type-switch" role="group" aria-label="Тип подхода">
         <button type="button" data-action="set-type" data-warmup="false" class="${formValues.warmup ? "" : "active"}" aria-pressed="${!formValues.warmup}"><span>Рабочий</span><small>№${workNumber}</small></button>
         <button type="button" data-action="set-type" data-warmup="true" class="${formValues.warmup ? "active" : ""}" aria-pressed="${formValues.warmup}"><span>Разминка</span><small>№${warmupNumber}</small></button>
         <input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} hidden />
       </div>
       <div class="input-pair">
-        <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-2.5">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="2.5">+</button></div></label>
+        <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-${weightIncrement}">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="${weightIncrement}">+</button></div></label>
         <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="${nativeKeyboard ? "numeric" : "none"}" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
       </div>
       ${keypadOpen ? renderKeypad() : ""}
@@ -1809,10 +1845,12 @@ function renderTodayStrengthSetRow(set, index) {
   `;
 }
 
-function renderStrengthQuickChips(exerciseId, previous) {
+function renderStrengthQuickChips(exerciseId, previous, editing = false) {
   const previousSets = previousWorkoutSets(exerciseId).filter((set) => !isCardioSet(set));
+  const supportsCoach = coachSupported(state.exercises.find((exercise) => exercise.id === exerciseId));
   return `
-    <div class="quick-actions options-only">
+    <div class="quick-actions coach-entry-actions ${editing || !supportsCoach ? "options-only" : ""}">
+      ${editing || !supportsCoach ? "" : `<button class="coach-button" type="button" data-action="open-coach">Тренер</button>`}
       <button type="button" data-action="toggle-strength-options">${strengthOptionsOpen ? "Скрыть варианты" : "Другие варианты"}</button>
     </div>
     ${strengthOptionsOpen ? `
@@ -1822,6 +1860,85 @@ function renderStrengthQuickChips(exerciseId, previous) {
       </div>
     ` : ""}
   `;
+}
+
+function openCoachSheet(root) {
+  const form = root.querySelector("[data-form='set'][data-kind='strength']");
+  if (!form || editingSetId) return;
+  rememberStrengthForm(form);
+  const draftWeight = form.elements.warmup?.checked ? null : form.elements.weight?.value;
+  const context = buildCoachContext(state, form.dataset.id, Date.now(), draftWeight);
+  if (!context.supported) return;
+  coachRecommendation = recommendNextSet(context);
+  coachSheetOpen = true;
+  keypadOpen = false;
+  render();
+}
+
+function closeCoachSheet() {
+  coachSheetOpen = false;
+  coachRecommendation = null;
+  render();
+}
+
+function renderCoachSheet() {
+  if (!coachRecommendation) return "";
+  const view = formatCoachRecommendation(coachRecommendation, currentLanguage);
+  const recommendation = coachRecommendation;
+  const reps = recommendation.reps
+    ? recommendation.reps.min === recommendation.reps.max
+      ? String(recommendation.reps.min)
+      : `${recommendation.reps.min}–${recommendation.reps.max}`
+    : null;
+  const rir = recommendation.targetRir == null
+    ? null
+    : typeof recommendation.targetRir === "object"
+      ? `${recommendation.targetRir.min}–${recommendation.targetRir.max}`
+      : String(recommendation.targetRir);
+  const canApply = recommendation.weight != null && recommendation.reps != null;
+  return `
+    <div class="modal-backdrop coach-backdrop" data-action="close-coach">
+      <section class="modal-sheet coach-sheet" role="dialog" aria-modal="true" aria-labelledby="coach-title" onclick="event.stopPropagation()">
+        <div class="coach-sheet-head">
+          <div><span>${view.title}</span><h2 id="coach-title">${view.action}</h2></div>
+          <button type="button" data-action="close-coach" aria-label="${view.copy.close}">×</button>
+        </div>
+        ${recommendation.weight != null ? `
+          <div class="coach-prescription">
+            <strong>${formatWeight(recommendation.weight)} кг × ${reps}</strong>
+            <span>${view.copy.targetRir}: ${rir}</span>
+          </div>
+        ` : ""}
+        <p class="coach-explanation">${view.explanation}</p>
+        <div class="coach-confidence"><span>${view.copy.confidenceLabel}</span><strong>${view.confidence}</strong><small>${view.confidenceHint}</small></div>
+        <p class="coach-safety">${view.copy.safety}</p>
+        ${recommendation.action === "finish" ? `<p class="coach-finish-hint">${view.copy.finishHint}</p>` : ""}
+        ${!canApply && recommendation.action === "insufficient_data" ? `<p class="muted">${view.copy.noApply}</p>` : ""}
+        <div class="coach-actions">
+          ${canApply ? `<button class="primary" type="button" data-action="apply-coach">${view.copy.apply}</button>` : ""}
+          <button type="button" data-action="close-coach">${view.copy.close}</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function applyCoachRecommendation() {
+  if (!coachRecommendation?.weight || !coachRecommendation.reps) return;
+  const targetRir = typeof coachRecommendation.targetRir === "object"
+    ? coachRecommendation.targetRir.min
+    : coachRecommendation.targetRir;
+  draftSet = {
+    weight: String(coachRecommendation.weight),
+    reps: String(coachRecommendation.reps.max),
+    reserve: Number(targetRir ?? 2),
+    warmup: false
+  };
+  strengthDraftDirty = false;
+  pendingSuggestionType = null;
+  coachSheetOpen = false;
+  coachRecommendation = null;
+  render();
 }
 
 function renderKeypad() {
@@ -2777,6 +2894,10 @@ function bindEvents(root) {
     if (continueToday) continueToday.hidden = Boolean(exerciseSearchQuery.trim());
   });
   root.querySelector("[data-form='exercise']")?.addEventListener("submit", saveExercise);
+  root.querySelector("[data-form='exercise'] [name='equipmentType']")?.addEventListener("change", (event) => {
+    const increment = event.currentTarget.closest("form")?.elements.weightIncrement;
+    if (increment) increment.value = String(defaultWeightIncrement(event.currentTarget.value));
+  });
   root.querySelectorAll("[data-image-input]").forEach((input) => input.addEventListener("change", () => {
     const text = input.closest(".file-picker")?.querySelector(".file-picker-text");
     if (text) text.textContent = input.files?.[0]?.name || localizeText("Выбрать файл");
@@ -2788,6 +2909,9 @@ function bindEvents(root) {
     strengthOptionsOpen = !strengthOptionsOpen;
     render();
   });
+  root.querySelector("[data-action='open-coach']")?.addEventListener("click", () => openCoachSheet(root));
+  root.querySelectorAll("[data-action='close-coach']").forEach((button) => button.addEventListener("click", closeCoachSheet));
+  root.querySelector("[data-action='apply-coach']")?.addEventListener("click", applyCoachRecommendation);
   root.querySelector("[data-action='toggle-rir-help']")?.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='strength']");
     if (form && !editingSetId) rememberStrengthForm(form);
@@ -3058,12 +3182,19 @@ async function saveExercise(event) {
   const data = new FormData(form);
   const file = data.get("image");
   const image = file && file.size ? await fileToDataUrl(file) : "";
+  const equipmentType = String(data.get("equipmentType") || "other");
+  const repMin = Math.max(1, Math.round(Number(data.get("coachRepMin")) || 8));
+  const repMax = Math.max(repMin, Math.round(Number(data.get("coachRepMax")) || 12));
+  const weightIncrement = Math.max(0.25, Number(data.get("weightIncrement")) || defaultWeightIncrement(equipmentType));
   const existing = form.dataset.id ? state.exercises.find((exercise) => exercise.id === form.dataset.id) : null;
   if (existing) {
     existing.name = String(data.get("name")).trim() || existing.name;
     existing.icon = String(data.get("icon")).trim() || existing.icon || "🏋️";
     existing.category = data.get("category");
-    existing.equipmentType = data.get("equipmentType");
+    existing.equipmentType = equipmentType;
+    existing.weightIncrement = weightIncrement;
+    existing.coachRepMin = repMin;
+    existing.coachRepMax = repMax;
     if (image) existing.image = image;
     editingExerciseId = null;
   } else {
@@ -3073,7 +3204,10 @@ async function saveExercise(event) {
       icon: String(data.get("icon")).trim() || "🏋️",
       image,
       category: data.get("category"),
-      equipmentType: data.get("equipmentType"),
+      equipmentType,
+      weightIncrement,
+      coachRepMin: repMin,
+      coachRepMax: repMax,
       createdAt: Date.now()
     });
   }
