@@ -1,9 +1,8 @@
-const CACHE_NAME = "training-log-pwa-v43";
+const CACHE_NAME = "training-log-pwa-v44";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./icons/icon.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
 ];
