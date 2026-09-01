@@ -5,7 +5,7 @@ import { formatCoachRecommendation } from "./coach/messages.js";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
 const LANGUAGE_KEY = "training-log-pwa-language";
-const DATA_VERSION = 8;
+const DATA_VERSION = 9;
 const UNDO_DURATION_MS = 5000;
 let currentLanguage = localStorage.getItem(LANGUAGE_KEY) === "ru" ? "ru" : "et";
 
@@ -223,6 +223,12 @@ const estonianPhrases = [
   ["шаг пары", "paari samm"],
   ["шаг", "samm"],
   ["на сторону", "mõlemale poole"],
+  ["Блины на сторону:", "Kettad ühel poolel:"],
+  ["Вес грифа, кг", "Kangi raskus, kg"],
+  ["гриф", "kang"],
+  ["Введите общий вес", "Sisesta koguraskus"],
+  ["Общий вес меньше веса грифа", "Koguraskus on väiksem kui kangi raskus"],
+  ["Пустой гриф:", "Tühi kang:"],
   ["Готово", "Valmis"],
   ["Гантелей в упражнении", "Hantlite arv harjutuses"],
   ["Минимальный шаг общего веса, кг", "Koguraskuse minimaalne samm, kg"],
@@ -641,6 +647,9 @@ function migrateState(input) {
       category: exercise.category || "other",
       equipmentType,
       dumbbellCount,
+      barWeight: ["barbell", "smith"].includes(equipmentType)
+        ? exercise.barWeight != null && Number.isFinite(Number(exercise.barWeight)) ? Math.max(0, Number(exercise.barWeight)) : 20
+        : 0,
       icon: exercise.icon || "🏋️",
       image: exercise.image || "",
       weightIncrement,
@@ -659,6 +668,7 @@ function migrateState(input) {
       category: "cardio",
       equipmentType: "cardio",
       dumbbellCount: 1,
+      barWeight: 0,
       icon: "🚣",
       image: "",
       weightIncrement: defaultWeightIncrement("cardio"),
@@ -877,8 +887,13 @@ function exerciseDumbbellCount(exercise) {
 
 function strengthWeightHint(exercise, weight) {
   if (["barbell", "smith"].includes(exercise?.equipmentType)) {
-    const step = exerciseCoachDefaults(exercise).increment;
-    return `Шаг ±${formatWeight(step)} кг · по ${formatWeight(step / 2)} кг на сторону`;
+    const total = Number(String(weight || "").replace(",", "."));
+    const barWeight = Math.max(0, Number(exercise.barWeight) || 0);
+    if (!Number.isFinite(total) || total <= 0) return `Введите общий вес · гриф ${formatExactWeight(barWeight)} кг`;
+    const platesPerSide = (total - barWeight) / 2;
+    if (platesPerSide < 0) return `Общий вес меньше веса грифа ${formatExactWeight(barWeight)} кг`;
+    if (platesPerSide === 0) return `Пустой гриф: ${formatExactWeight(barWeight)} кг`;
+    return `Блины на сторону: ${formatExactWeight(platesPerSide)} кг · гриф ${formatExactWeight(barWeight)} кг`;
   }
   if (exercise?.equipmentType !== "dumbbell") return "";
   const count = exerciseDumbbellCount(exercise);
@@ -888,6 +903,14 @@ function strengthWeightHint(exercise, weight) {
   if (!Number.isFinite(total) || total <= 0) return `Введите общий вес двух гантелей · шаг пары ±${formatWeight(step)} кг`;
   const each = total / 2;
   return `Пара: ${formatWeight(each)} + ${formatWeight(each)} = ${formatWeight(total)} кг · шаг ±${formatWeight(step)} кг`;
+}
+
+function formatExactWeight(value) {
+  const number = Number(value) || 0;
+  return new Intl.NumberFormat(currentLanguage === "et" ? "et-EE" : "ru-RU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  }).format(number);
 }
 
 function reserveValue(set) {
@@ -1550,6 +1573,7 @@ function renderExerciseForm(exercise = null) {
         <label>Группа<select name="category">${categories.map(([k, v]) => `<option value="${k}" ${exercise?.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
         <label>Оборудование<select name="equipmentType">${equipment.map(([k, v]) => `<option value="${k}" ${exercise?.equipmentType === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
         <label class="dumbbell-count-field ${exercise?.equipmentType === "dumbbell" ? "" : "is-hidden"}">Гантелей в упражнении<select name="dumbbellCount"><option value="2" ${dumbbellCount === 2 ? "selected" : ""}>Две</option><option value="1" ${dumbbellCount === 1 ? "selected" : ""}>Одна</option></select></label>
+        <label class="bar-weight-field ${["barbell", "smith"].includes(exercise?.equipmentType) ? "" : "is-hidden"}">Вес грифа, кг<input name="barWeight" type="number" inputmode="decimal" min="0" step="0.25" value="${exercise?.barWeight ?? 20}" /></label>
         ${showCoachSettings ? `
           <fieldset class="wide coach-form-fields">
             <legend>Настройки тренера</legend>
@@ -3017,6 +3041,9 @@ function bindEvents(root) {
     const increment = form?.elements.weightIncrement;
     if (increment) increment.value = String(defaultWeightIncrement(event.currentTarget.value, dumbbellCount));
     form?.querySelector(".dumbbell-count-field")?.classList.toggle("is-hidden", event.currentTarget.value !== "dumbbell");
+    const usesBar = ["barbell", "smith"].includes(event.currentTarget.value);
+    form?.querySelector(".bar-weight-field")?.classList.toggle("is-hidden", !usesBar);
+    if (usesBar && form?.elements.barWeight && form.elements.barWeight.value === "") form.elements.barWeight.value = "20";
     updateExerciseWeightSemantics(form);
   });
   root.querySelector("[data-form='exercise'] [name='dumbbellCount']")?.addEventListener("change", (event) => {
@@ -3333,6 +3360,7 @@ async function saveExercise(event) {
   const image = file && file.size ? await fileToDataUrl(file) : "";
   const equipmentType = String(data.get("equipmentType") || "other");
   const dumbbellCount = equipmentType === "dumbbell" ? Math.max(1, Math.min(2, Number(data.get("dumbbellCount")) || 2)) : 1;
+  const barWeight = ["barbell", "smith"].includes(equipmentType) ? Math.max(0, Number(data.get("barWeight")) || 0) : 0;
   const repMin = Math.max(1, Math.round(Number(data.get("coachRepMin")) || 8));
   const repMax = Math.max(repMin, Math.round(Number(data.get("coachRepMax")) || 12));
   const weightIncrement = Math.max(0.25, Number(data.get("weightIncrement")) || defaultWeightIncrement(equipmentType, dumbbellCount));
@@ -3343,6 +3371,7 @@ async function saveExercise(event) {
     existing.category = data.get("category");
     existing.equipmentType = equipmentType;
     existing.dumbbellCount = dumbbellCount;
+    existing.barWeight = barWeight;
     existing.weightIncrement = weightIncrement;
     existing.coachRepMin = repMin;
     existing.coachRepMax = repMax;
@@ -3357,6 +3386,7 @@ async function saveExercise(event) {
       category: data.get("category"),
       equipmentType,
       dumbbellCount,
+      barWeight,
       weightIncrement,
       coachRepMin: repMin,
       coachRepMax: repMax,
