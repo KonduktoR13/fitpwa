@@ -202,8 +202,24 @@ test("conflicting sessions resolve conservatively", () => {
 
 test("history cannot inflate an equipment default increment", () => {
   assert.equal(defaultWeightIncrement("barbell"), 2.5);
+  assert.equal(defaultWeightIncrement("smith"), 2.5);
+  assert.equal(defaultWeightIncrement("dumbbell", 2), 4);
+  assert.equal(defaultWeightIncrement("dumbbell", 1), 2);
   const defaults = exerciseCoachDefaults({ equipmentType: "barbell" });
   assert.equal(defaults.increment, 2.5);
+});
+
+test("paired dumbbell coach uses total load and the pair increment", () => {
+  const result = recommend({
+    increment: defaultWeightIncrement("dumbbell", 2),
+    historicalSessions: [
+      session(21, [set(44, 12, 2), set(44, 12, 2)]),
+      session(14, [set(44, 12, 2), set(44, 12, 2)]),
+      session(7, [set(44, 12, 2), set(44, 12, 2)])
+    ]
+  });
+  assert.equal(result.action, COACH_ACTIONS.INCREASE);
+  assert.equal(result.weight, 48);
 });
 
 test("cardio and bodyweight are explicitly unsupported in v1", () => {

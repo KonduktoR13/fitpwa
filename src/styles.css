@@ -3154,6 +3154,12 @@ h1 {
   font-weight: 750;
 }
 
+.coach-prescription small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .coach-explanation {
   line-height: 1.45;
 }
@@ -3428,6 +3434,15 @@ h1 {
   outline-offset: -3px;
 }
 
+.strength-weight-hint {
+  min-height: 15px;
+  padding-inline: 3px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
 .rir-control {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3479,6 +3494,47 @@ h1 {
   background: transparent;
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.workout-tertiary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.compact-coach-button {
+  min-height: 36px;
+  padding: 5px 13px;
+  border-color: color-mix(in srgb, var(--primary) 58%, var(--line));
+  color: var(--primary);
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.keypad .keypad-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 2px 4px;
+}
+
+.keypad .keypad-head strong {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.keypad .keypad-head button {
+  min-height: 40px;
+  padding-inline: 16px;
+  color: var(--primary);
+}
+
+.dumbbell-count-field.is-hidden {
+  display: none;
 }
 
 .compact-note textarea {

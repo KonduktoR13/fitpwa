@@ -5,7 +5,7 @@ import { formatCoachRecommendation } from "./coach/messages.js";
 
 const STORAGE_KEY = "training-log-pwa-state-v1";
 const LANGUAGE_KEY = "training-log-pwa-language";
-const DATA_VERSION = 7;
+const DATA_VERSION = 8;
 const UNDO_DURATION_MS = 5000;
 let currentLanguage = localStorage.getItem(LANGUAGE_KEY) === "ru" ? "ru" : "et";
 
@@ -215,6 +215,20 @@ const estonianPhrases = [
   ["Укажите RIR", "Vali RIR"],
   ["Добавить заметку", "Lisa märkus"],
   ["Скрыть заметку", "Peida märkus"],
+  ["Общий вес", "Koguraskus"],
+  ["Вес гантели", "Hantli raskus"],
+  ["Вес одной гантели", "Ühe hantli raskus"],
+  ["Введите общий вес двух гантелей", "Sisesta kahe hantli koguraskus"],
+  ["Пара:", "Paar:"],
+  ["шаг пары", "paari samm"],
+  ["шаг", "samm"],
+  ["на сторону", "mõlemale poole"],
+  ["Готово", "Valmis"],
+  ["Гантелей в упражнении", "Hantlite arv harjutuses"],
+  ["Минимальный шаг общего веса, кг", "Koguraskuse minimaalne samm, kg"],
+  ["Для пары указывается сумма двух одинаковых гантелей; шаг тоже общий для пары.", "Paari puhul sisesta kahe võrdse hantli summa; ka samm käib paari koguraskuse kohta."],
+  ["Две", "Kaks"],
+  ["Одна", "Üks"],
   ["Записанных подходов пока нет", "Salvestatud seeriaid veel pole"],
   ["без прошлого ориентира", "varasem võrdlus puudub"],
   ["Подставить", "Kasuta"],
@@ -592,6 +606,7 @@ function loadState() {
 }
 
 function migrateState(input) {
+  const previousDataVersion = Number(input.schemaVersion) || 1;
   const migrated = {
     schemaVersion: DATA_VERSION,
     exercises: [],
@@ -608,27 +623,42 @@ function migrateState(input) {
   if (!localStorage.getItem(LANGUAGE_KEY) && ["et", "ru"].includes(migrated.settings.language)) {
     currentLanguage = migrated.settings.language;
   }
-  migrated.exercises = (input.exercises || []).map((exercise) => ({
-    id: exercise.id || uid(),
-    name: exercise.name === "Гребля 3000 м" ? "Гребля" : exercise.name || "Упражнение",
-    category: exercise.category || "other",
-    equipmentType: exercise.equipmentType || "other",
-    icon: exercise.icon || "🏋️",
-    image: exercise.image || "",
-    weightIncrement: Math.max(0.25, Number(exercise.weightIncrement) || defaultWeightIncrement(exercise.equipmentType || "other")),
-    coachRepMin: Math.max(1, Math.round(Number(exercise.coachRepMin) || 8)),
-    coachRepMax: Math.max(
-      Math.max(1, Math.round(Number(exercise.coachRepMin) || 8)),
-      Math.round(Number(exercise.coachRepMax) || 12)
-    ),
-    createdAt: exercise.createdAt || Date.now()
-  }));
+  migrated.exercises = (input.exercises || []).map((exercise) => {
+    const name = exercise.name === "Гребля 3000 м" ? "Гребля" : exercise.name || "Упражнение";
+    const equipmentType = exercise.equipmentType || "other";
+    const dumbbellCount = equipmentType === "dumbbell"
+      ? Math.max(1, Math.min(2, Math.round(Number(exercise.dumbbellCount) || defaultDumbbellCount(name))))
+      : 1;
+    let weightIncrement = Math.max(0.25, Number(exercise.weightIncrement) || defaultWeightIncrement(equipmentType, dumbbellCount));
+    // Before v8 dumbbell entries represented one hand. Paired exercises now use
+    // total external load, so both the historical load and its step scale by two.
+    if (previousDataVersion < 8 && equipmentType === "dumbbell" && dumbbellCount === 2) {
+      weightIncrement *= 2;
+    }
+    return {
+      id: exercise.id || uid(),
+      name,
+      category: exercise.category || "other",
+      equipmentType,
+      dumbbellCount,
+      icon: exercise.icon || "🏋️",
+      image: exercise.image || "",
+      weightIncrement,
+      coachRepMin: Math.max(1, Math.round(Number(exercise.coachRepMin) || 8)),
+      coachRepMax: Math.max(
+        Math.max(1, Math.round(Number(exercise.coachRepMin) || 8)),
+        Math.round(Number(exercise.coachRepMax) || 12)
+      ),
+      createdAt: exercise.createdAt || Date.now()
+    };
+  });
   if (!migrated.exercises.some((exercise) => isRowingExercise(exercise))) {
     migrated.exercises.push({
       id: uid(),
       name: "Гребля",
       category: "cardio",
       equipmentType: "cardio",
+      dumbbellCount: 1,
       icon: "🚣",
       image: "",
       weightIncrement: defaultWeightIncrement("cardio"),
@@ -665,11 +695,13 @@ function migrateState(input) {
         return next;
       }
       const reserve = set.reserve != null ? Number(set.reserve) : reserveValue(set);
+      const exercise = migrated.exercises.find((item) => item.id === set.exerciseId);
+      const legacyPairMultiplier = previousDataVersion < 8 && exercise?.equipmentType === "dumbbell" && exerciseDumbbellCount(exercise) === 2 ? 2 : 1;
       const next = {
         id: set.id || uid(),
         type: "strength",
         exerciseId: set.exerciseId,
-        weight: Number(set.weight),
+        weight: Number(set.weight) * legacyPairMultiplier,
         reps: Number(set.reps),
         reserve: Math.max(0, Math.min(10, Number.isFinite(reserve) ? reserve : 0)),
         warmup: Boolean(set.warmup),
@@ -832,6 +864,30 @@ function isRowingExercise(exercise) {
 
 function isEllipticalExercise(exercise) {
   return /эллип|ellipt/i.test(exercise?.name || "");
+}
+
+function defaultDumbbellCount(name = "") {
+  return /тяга гантели|one[- ]arm|single[- ]arm/i.test(name) ? 1 : 2;
+}
+
+function exerciseDumbbellCount(exercise) {
+  if (exercise?.equipmentType !== "dumbbell") return 1;
+  return Math.max(1, Math.min(2, Math.round(Number(exercise.dumbbellCount) || defaultDumbbellCount(exercise.name))));
+}
+
+function strengthWeightHint(exercise, weight) {
+  if (["barbell", "smith"].includes(exercise?.equipmentType)) {
+    const step = exerciseCoachDefaults(exercise).increment;
+    return `Шаг ±${formatWeight(step)} кг · по ${formatWeight(step / 2)} кг на сторону`;
+  }
+  if (exercise?.equipmentType !== "dumbbell") return "";
+  const count = exerciseDumbbellCount(exercise);
+  const step = exerciseCoachDefaults(exercise).increment;
+  const total = Number(String(weight || "").replace(",", "."));
+  if (count === 1) return `Вес одной гантели · шаг ±${formatWeight(step)} кг`;
+  if (!Number.isFinite(total) || total <= 0) return `Введите общий вес двух гантелей · шаг пары ±${formatWeight(step)} кг`;
+  const each = total / 2;
+  return `Пара: ${formatWeight(each)} + ${formatWeight(each)} = ${formatWeight(total)} кг · шаг ±${formatWeight(step)} кг`;
 }
 
 function reserveValue(set) {
@@ -1225,17 +1281,19 @@ function notify(text, tone = "") {
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
     toast = null;
-    render();
+    document.querySelector(".toast")?.remove();
   }, 1800);
 }
 
 function showUndo(record) {
+  toast = null;
+  window.clearTimeout(toastTimer);
   undoRecord = record;
   window.clearTimeout(undoTimer);
   undoTimer = window.setTimeout(() => {
     undoRecord = null;
     undoTimer = null;
-    render();
+    document.querySelector(".undo-bar")?.remove();
   }, UNDO_DURATION_MS);
 }
 
@@ -1481,6 +1539,8 @@ function renderExerciseCard(exercise) {
 function renderExerciseForm(exercise = null) {
   const coachDefaults = exerciseCoachDefaults(exercise || { equipmentType: "barbell" });
   const showCoachSettings = !exercise || coachSupported(exercise);
+  const dumbbellCount = exerciseDumbbellCount(exercise || { equipmentType: "dumbbell", name: "" });
+  const pairedDumbbells = exercise?.equipmentType === "dumbbell" && dumbbellCount === 2;
   return `
     <form class="panel exercise-form" data-form="exercise" ${exercise ? `data-id="${exercise.id}"` : ""}>
       <h2>${exercise ? "Редактировать упражнение" : "Новое упражнение"}</h2>
@@ -1489,13 +1549,14 @@ function renderExerciseForm(exercise = null) {
         <label>Иконка<input name="icon" maxlength="4" value="${exercise?.icon || "🏋️"}" /></label>
         <label>Группа<select name="category">${categories.map(([k, v]) => `<option value="${k}" ${exercise?.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
         <label>Оборудование<select name="equipmentType">${equipment.map(([k, v]) => `<option value="${k}" ${exercise?.equipmentType === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+        <label class="dumbbell-count-field ${exercise?.equipmentType === "dumbbell" ? "" : "is-hidden"}">Гантелей в упражнении<select name="dumbbellCount"><option value="2" ${dumbbellCount === 2 ? "selected" : ""}>Две</option><option value="1" ${dumbbellCount === 1 ? "selected" : ""}>Одна</option></select></label>
         ${showCoachSettings ? `
           <fieldset class="wide coach-form-fields">
             <legend>Настройки тренера</legend>
-            <label>Минимальный шаг веса, кг<input name="weightIncrement" type="number" inputmode="decimal" min="0.25" step="0.25" required value="${coachDefaults.increment}" /></label>
+            <label><span class="weight-increment-label">${pairedDumbbells ? "Минимальный шаг общего веса, кг" : "Минимальный шаг веса, кг"}</span><input name="weightIncrement" type="number" inputmode="decimal" min="0.25" step="0.25" required value="${coachDefaults.increment}" /></label>
             <label>Нижняя граница повторений<input name="coachRepMin" type="number" inputmode="numeric" min="1" max="99" required value="${coachDefaults.repMin}" /></label>
             <label>Верхняя граница повторений<input name="coachRepMax" type="number" inputmode="numeric" min="1" max="100" required value="${coachDefaults.repMax}" /></label>
-            <small>Используется только для локальных рекомендаций силовых подходов.</small>
+            <small class="coach-weight-semantics">${pairedDumbbells ? "Для пары указывается сумма двух одинаковых гантелей; шаг тоже общий для пары." : "Используется только для локальных рекомендаций силовых подходов."}</small>
           </fieldset>
         ` : ""}
         <label class="wide">Своя картинка<span class="file-picker"><span class="file-picker-text">Выбрать файл</span><input type="file" name="image" accept="image/*" data-image-input /></span></label>
@@ -1545,19 +1606,15 @@ function renderExercise(exerciseId) {
       <div><h1>${exercise.name}</h1><span>${label(equipment, exercise.equipmentType)}</span></div>
       <button data-action="toggle-exercise-menu" class="workout-menu-button" aria-label="Другие действия" aria-expanded="${exerciseMenuOpen}">•••</button>
     </header>
-    ${exerciseMenuOpen ? renderExerciseMenu(exercise, Boolean(editingSet)) : ""}
+    ${exerciseMenuOpen ? renderExerciseMenu(exercise) : ""}
     ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues)}
   `;
 }
 
-function renderExerciseMenu(exercise, editing = false) {
-  const supportsCoach = coachSupported(exercise);
+function renderExerciseMenu(exercise) {
   return `
     <div class="exercise-action-menu">
-      ${!editing && supportsCoach ? `<button type="button" data-action="open-coach">Тренер</button>` : ""}
       ${!isCardioExercise(exercise) ? `<button type="button" data-action="toggle-strength-options">${strengthOptionsOpen ? "Скрыть варианты" : "Другие варианты"}</button>` : ""}
-      <button type="button" data-action="progress-exercise" data-id="${exercise.id}">Прогресс</button>
-      <button type="button" data-action="history">История</button>
       <button type="button" data-action="edit-exercise" data-id="${exercise.id}">Править</button>
     </div>
     ${strengthOptionsOpen ? renderStrengthOptions(exercise.id) : ""}
@@ -1586,6 +1643,7 @@ function renderStrengthEntry(exercise, editingSet, formValues) {
   const weightIncrement = exerciseCoachDefaults(exercise).increment;
   const todaySets = todayStrengthSets(exercise.id);
   const selectedRir = formValues.reserve === "" || formValues.reserve == null ? "" : Number(formValues.reserve);
+  const pairedDumbbells = exercise.equipmentType === "dumbbell" && exerciseDumbbellCount(exercise) === 2;
   return `
     <form class="set-entry workout-console ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><div><button type="button" data-action="delete-set" data-id="${editingSet.id}">Удалить</button><button type="button" data-action="cancel-edit">Отмена</button></div></div>` : ""}
@@ -1596,7 +1654,7 @@ function renderStrengthEntry(exercise, editingSet, formValues) {
         <input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} hidden />
       </div>
       <div class="input-pair workout-values">
-        <label class="number-control"><span>Вес <small>${state.settings.unit}</small></span><div><button type="button" data-step-field="weight" data-delta="-${weightIncrement}" aria-label="Уменьшить вес">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="—" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="${weightIncrement}" aria-label="Увеличить вес">+</button></div></label>
+        <label class="number-control"><span>${pairedDumbbells ? "Общий вес" : exercise.equipmentType === "dumbbell" ? "Вес гантели" : "Вес"} <small>${state.settings.unit}</small></span><div><button type="button" data-step-field="weight" data-delta="-${weightIncrement}" aria-label="Уменьшить вес">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="—" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="${weightIncrement}" aria-label="Увеличить вес">+</button></div>${strengthWeightHint(exercise, formValues.weight) ? `<small class="strength-weight-hint">${strengthWeightHint(exercise, formValues.weight)}</small>` : ""}</label>
         <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="${nativeKeyboard ? "numeric" : "none"}" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
       </div>
       ${keypadOpen ? renderKeypad() : ""}
@@ -1607,7 +1665,10 @@ function renderStrengthEntry(exercise, editingSet, formValues) {
           ${[0, 1, 2, 3, 4].map((value) => `<button type="button" data-rir-value="${value}" class="${selectedRir === value ? "active" : ""}" aria-pressed="${selectedRir === value}">${value === 4 ? "4+" : value}</button>`).join("")}
         </div>
       </div>
-      <button class="note-toggle" type="button" data-action="toggle-note">${noteOpen || formValues.note ? "Скрыть заметку" : "+ Добавить заметку"}</button>
+      <div class="workout-tertiary-actions">
+        <button class="note-toggle" type="button" data-action="toggle-note">${noteOpen || formValues.note ? "Скрыть заметку" : "+ Добавить заметку"}</button>
+        ${!editingSet && coachSupported(exercise) ? `<button class="coach-button compact-coach-button" type="button" data-action="open-coach">Тренер</button>` : ""}
+      </div>
       ${noteOpen || formValues.note ? `<label class="set-note compact-note"><textarea name="note" rows="2" placeholder="Техника, самочувствие, настройка">${formValues.note || ""}</textarea></label>` : `<input type="hidden" name="note" value="">`}
       ${formError ? `<p class="form-error">${formError}</p>` : ""}
       <button class="primary save-set" type="submit" ${invalid ? "disabled" : ""}>${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
@@ -1809,6 +1870,7 @@ function applySuggestedStrengthValues(root) {
   strengthDraftDirty = false;
   pendingSuggestionType = null;
   syncReserveUi(root, suggestion.reserve);
+  updateStrengthWeightHint(form);
   updateStrengthComparison(root);
 }
 
@@ -1908,6 +1970,7 @@ function closeCoachSheet() {
 
 function renderCoachSheet() {
   if (!coachRecommendation) return "";
+  const exercise = route.name === "exercise" ? state.exercises.find((item) => item.id === route.id) : null;
   const view = formatCoachRecommendation(coachRecommendation, currentLanguage);
   const recommendation = coachRecommendation;
   const reps = recommendation.reps
@@ -1931,6 +1994,7 @@ function renderCoachSheet() {
         ${recommendation.weight != null ? `
           <div class="coach-prescription">
             <strong>${formatWeight(recommendation.weight)} кг × ${reps}</strong>
+            ${exercise?.equipmentType === "dumbbell" ? `<small>${strengthWeightHint(exercise, recommendation.weight)}</small>` : ""}
             <span>${view.copy.targetRir}: ${rir}</span>
           </div>
         ` : ""}
@@ -1970,6 +2034,7 @@ function renderKeypad() {
   const decimalDisabled = activeSetField === "reps" ? "disabled" : "";
   return `
     <div class="keypad" aria-label="Цифровой ввод">
+      <div class="keypad-head"><strong>${activeSetField === "reps" ? "Повторы" : "Вес"}</strong><button type="button" data-action="close-keypad">Готово</button></div>
       ${["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((key) => `<button type="button" data-key="${key}">${key}</button>`).join("")}
       <button type="button" data-key="clear">C</button>
       <button type="button" data-key="0">0</button>
@@ -2005,6 +2070,7 @@ function applyStrengthPreset(root, source) {
   strengthDraftDirty = false;
   pendingSuggestionType = null;
   syncReserveUi(root, reserve);
+  updateStrengthWeightHint(form);
   refreshStrengthValidity(form);
   updateStrengthComparison(root);
 }
@@ -2013,6 +2079,24 @@ function refreshStrengthValidity(form) {
   const button = form?.querySelector(".save-set");
   if (!button) return;
   button.disabled = Boolean(validateStrengthDraft(strengthFormValues(form)));
+}
+
+function updateStrengthWeightHint(form) {
+  const hint = form?.querySelector(".strength-weight-hint");
+  if (!hint) return;
+  const exercise = state.exercises.find((item) => item.id === form.dataset.id);
+  hint.textContent = localizeText(strengthWeightHint(exercise, form.elements.weight?.value));
+}
+
+function updateExerciseWeightSemantics(form) {
+  if (!form) return;
+  const paired = form.elements.equipmentType?.value === "dumbbell" && Number(form.elements.dumbbellCount?.value) === 2;
+  const label = form.querySelector(".weight-increment-label");
+  const hint = form.querySelector(".coach-weight-semantics");
+  if (label) label.textContent = localizeText(paired ? "Минимальный шаг общего веса, кг" : "Минимальный шаг веса, кг");
+  if (hint) hint.textContent = localizeText(paired
+    ? "Для пары указывается сумма двух одинаковых гантелей; шаг тоже общий для пары."
+    : "Используется только для локальных рекомендаций силовых подходов.");
 }
 
 function renderMiniProgress(exerciseId) {
@@ -2928,8 +3012,19 @@ function bindEvents(root) {
   });
   root.querySelector("[data-form='exercise']")?.addEventListener("submit", saveExercise);
   root.querySelector("[data-form='exercise'] [name='equipmentType']")?.addEventListener("change", (event) => {
-    const increment = event.currentTarget.closest("form")?.elements.weightIncrement;
-    if (increment) increment.value = String(defaultWeightIncrement(event.currentTarget.value));
+    const form = event.currentTarget.closest("form");
+    const dumbbellCount = Number(form?.elements.dumbbellCount?.value) || 2;
+    const increment = form?.elements.weightIncrement;
+    if (increment) increment.value = String(defaultWeightIncrement(event.currentTarget.value, dumbbellCount));
+    form?.querySelector(".dumbbell-count-field")?.classList.toggle("is-hidden", event.currentTarget.value !== "dumbbell");
+    updateExerciseWeightSemantics(form);
+  });
+  root.querySelector("[data-form='exercise'] [name='dumbbellCount']")?.addEventListener("change", (event) => {
+    const form = event.currentTarget.closest("form");
+    if (form?.elements.equipmentType?.value === "dumbbell" && form.elements.weightIncrement) {
+      form.elements.weightIncrement.value = String(defaultWeightIncrement("dumbbell", Number(event.currentTarget.value)));
+    }
+    updateExerciseWeightSemantics(form);
   });
   root.querySelectorAll("[data-image-input]").forEach((input) => input.addEventListener("change", () => {
     const text = input.closest(".file-picker")?.querySelector(".file-picker-text");
@@ -3011,7 +3106,6 @@ function bindEvents(root) {
     updateStrengthComparison(root);
   });
   root.querySelectorAll("[data-set-field]").forEach((input) => {
-    let clearTimer = null;
     input.addEventListener("focus", () => {
       activeSetField = input.dataset.setField;
       keypadOpen = true;
@@ -3027,23 +3121,9 @@ function bindEvents(root) {
       if (!editingSetId) draftSet[input.dataset.setField] = input.value;
       strengthDraftDirty = true;
       pendingSuggestionType = null;
+      if (input.dataset.setField === "weight") updateStrengthWeightHint(input.closest("form"));
       refreshStrengthValidity(input.closest("form"));
       updateStrengthComparison(root);
-    });
-    input.addEventListener("pointerdown", () => {
-      const field = input.dataset.setField;
-      clearTimer = window.setTimeout(() => {
-        const currentInput = document.querySelector(`[data-set-field='${field}']`);
-        if (currentInput) currentInput.value = "";
-        if (!editingSetId) draftSet[field] = "";
-        strengthDraftDirty = true;
-        pendingSuggestionType = null;
-        haptic(18);
-        render();
-      }, 520);
-    });
-    ["pointerup", "pointerleave", "pointercancel"].forEach((eventName) => {
-      input.addEventListener(eventName, () => window.clearTimeout(clearTimer));
     });
   });
   root.querySelectorAll("[data-step-field]").forEach((button) => button.addEventListener("click", () => {
@@ -3054,13 +3134,23 @@ function bindEvents(root) {
     if (!editingSetId) draftSet[button.dataset.stepField] = input.value;
     strengthDraftDirty = true;
     pendingSuggestionType = null;
+    if (button.dataset.stepField === "weight") updateStrengthWeightHint(input.closest("form"));
     refreshStrengthValidity(input.closest("form"));
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => {
     handleKeypad(button.dataset.key);
+    const form = root.querySelector("[data-form='set'][data-kind='strength']");
+    updateStrengthWeightHint(form);
+    refreshStrengthValidity(form);
     updateStrengthComparison(root);
   }));
+  root.querySelector("[data-action='close-keypad']")?.addEventListener("click", () => {
+    keypadOpen = false;
+    nativeKeyboard = false;
+    document.activeElement?.blur();
+    render();
+  });
   root.querySelector("[data-action='toggle-keyboard']")?.addEventListener("click", () => {
     nativeKeyboard = !nativeKeyboard;
     keypadOpen = true;
@@ -3242,15 +3332,17 @@ async function saveExercise(event) {
   const file = data.get("image");
   const image = file && file.size ? await fileToDataUrl(file) : "";
   const equipmentType = String(data.get("equipmentType") || "other");
+  const dumbbellCount = equipmentType === "dumbbell" ? Math.max(1, Math.min(2, Number(data.get("dumbbellCount")) || 2)) : 1;
   const repMin = Math.max(1, Math.round(Number(data.get("coachRepMin")) || 8));
   const repMax = Math.max(repMin, Math.round(Number(data.get("coachRepMax")) || 12));
-  const weightIncrement = Math.max(0.25, Number(data.get("weightIncrement")) || defaultWeightIncrement(equipmentType));
+  const weightIncrement = Math.max(0.25, Number(data.get("weightIncrement")) || defaultWeightIncrement(equipmentType, dumbbellCount));
   const existing = form.dataset.id ? state.exercises.find((exercise) => exercise.id === form.dataset.id) : null;
   if (existing) {
     existing.name = String(data.get("name")).trim() || existing.name;
     existing.icon = String(data.get("icon")).trim() || existing.icon || "🏋️";
     existing.category = data.get("category");
     existing.equipmentType = equipmentType;
+    existing.dumbbellCount = dumbbellCount;
     existing.weightIncrement = weightIncrement;
     existing.coachRepMin = repMin;
     existing.coachRepMax = repMax;
@@ -3264,6 +3356,7 @@ async function saveExercise(event) {
       image,
       category: data.get("category"),
       equipmentType,
+      dumbbellCount,
       weightIncrement,
       coachRepMin: repMin,
       coachRepMax: repMax,

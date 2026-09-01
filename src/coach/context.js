@@ -2,15 +2,17 @@ import { DEFAULT_COACH_CONFIG } from "./engine.js";
 
 const EQUIPMENT_INCREMENTS = Object.freeze({
   barbell: 2.5,
+  // Common commercial fixed dumbbells above 10 kg advance by 2 kg per hand.
   dumbbell: 2,
   cable: 5,
   machine: 5,
-  smith: 5,
+  smith: 2.5,
   other: 1
 });
 
-export function defaultWeightIncrement(equipmentType) {
-  return EQUIPMENT_INCREMENTS[equipmentType] || 1;
+export function defaultWeightIncrement(equipmentType, dumbbellCount = 2) {
+  const base = EQUIPMENT_INCREMENTS[equipmentType] || 1;
+  return equipmentType === "dumbbell" ? base * Math.max(1, Math.min(2, Number(dumbbellCount) || 2)) : base;
 }
 
 export function coachSupported(exercise) {
@@ -25,7 +27,7 @@ function localDayKey(timestamp) {
 export function exerciseCoachDefaults(exercise) {
   const repMin = Math.max(1, Math.round(Number(exercise?.coachRepMin) || DEFAULT_COACH_CONFIG.repMin));
   return {
-    increment: Math.max(0.25, Number(exercise?.weightIncrement) || defaultWeightIncrement(exercise?.equipmentType)),
+    increment: Math.max(0.25, Number(exercise?.weightIncrement) || defaultWeightIncrement(exercise?.equipmentType, exercise?.dumbbellCount)),
     repMin,
     repMax: Math.max(repMin, Math.round(Number(exercise?.coachRepMax) || DEFAULT_COACH_CONFIG.repMax)),
     targetRir: DEFAULT_COACH_CONFIG.targetRir
