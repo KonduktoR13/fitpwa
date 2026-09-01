@@ -3858,8 +3858,12 @@ if ("serviceWorker" in navigator) {
 render();
 
 async function registerServiceWorker() {
-  const registration = await navigator.serviceWorker.register("./sw.js");
+  // GitHub Pages serves static files with a short HTTP cache. Bypass it for the
+  // worker script so an installed app can discover a release as soon as it opens.
+  const registration = await navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" });
   serviceWorkerRegistration = registration;
+
+  registration.update().catch(() => {});
 
   if (registration.waiting) {
     showUpdatePrompt(registration.waiting);
