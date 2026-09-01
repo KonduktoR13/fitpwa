@@ -200,7 +200,9 @@ const estonianPhrases = [
   ["Закрыть таймер", "Sulge taimer"],
   ["Назад", "Tagasi"],
   ["Править", "Muuda"],
+  ["Другие действия", "Muud toimingud"],
   ["Динамика", "Muutus"],
+  ["Вес", "Raskus"],
   ["Повторы", "Kordused"],
   ["Разминка", "Soojendus"],
   ["Рабочий", "Tööseeria"],
@@ -210,6 +212,13 @@ const estonianPhrases = [
   ["Записать подход", "Salvesta seeria"],
   ["Записать кардио", "Salvesta kardio"],
   ["Записать упражнение", "Salvesta harjutus"],
+  ["Укажите RIR", "Vali RIR"],
+  ["Добавить заметку", "Lisa märkus"],
+  ["Скрыть заметку", "Peida märkus"],
+  ["Записанных подходов пока нет", "Salvestatud seeriaid veel pole"],
+  ["без прошлого ориентира", "varasem võrdlus puudub"],
+  ["Подставить", "Kasuta"],
+  ["Прошлый №", "Eelmine nr "],
   ["Минуты", "Minutid"],
   ["Секунды", "Sekundid"],
   ["мин разогрев", "min soojendus"],
@@ -506,7 +515,7 @@ const seedExercises = [
 
 let state = loadState();
 let route = { name: "home" };
-let draftSet = { weight: "", reps: "8", reserve: 2, warmup: false };
+let draftSet = { weight: "", reps: "8", reserve: "", warmup: false };
 let draftCardio = { minutes: "", seconds: "", distanceM: "", setting: "" };
 let exerciseFormOpen = false;
 let chartRefs = [];
@@ -534,6 +543,7 @@ let chartTooltip = null;
 let toast = null;
 let toastTimer = null;
 let strengthOptionsOpen = false;
+let exerciseMenuOpen = false;
 let coachSheetOpen = false;
 let coachRecommendation = null;
 let rirHelpOpen = false;
@@ -541,6 +551,7 @@ let historyCalendarOpen = false;
 let settingsTechnicalOpen = false;
 let progressExplanationOpen = false;
 let draftNote = "";
+let noteOpen = false;
 let undoRecord = null;
 let undoTimer = null;
 let restTimerEnd = null;
@@ -720,7 +731,12 @@ function sameRoute(left, right) {
 function setRoute(next, { historyMode = "push", scrollY = 0 } = {}) {
   const previous = route;
   if (previous.name === "exercise" && !sameRoute(previous, next)) rememberCurrentExerciseDraft();
-  if (next.name === "exercise" && !editingSetId && !sameRoute(previous, next)) restoreExerciseDraft(next.id);
+  if (next.name === "exercise" && !sameRoute(previous, next)) {
+    noteOpen = false;
+    exerciseMenuOpen = false;
+    strengthOptionsOpen = false;
+    if (!editingSetId) restoreExerciseDraft(next.id);
+  }
   route = next;
   if (next.name === "home") expandedExerciseGroups = new Set();
   if (next.name !== "exercise") {
@@ -729,6 +745,7 @@ function setRoute(next, { historyMode = "push", scrollY = 0 } = {}) {
     keypadOpen = false;
     formError = "";
     strengthOptionsOpen = false;
+    exerciseMenuOpen = false;
     coachSheetOpen = false;
     coachRecommendation = null;
     rirHelpOpen = false;
@@ -1162,13 +1179,15 @@ function suggestedDraftSet(exerciseId, fallback = {}) {
   const previousAny = previousSession
     .filter((set) => !isCardioSet(set))
     .sort((a, b) => a.createdAt - b.createdAt);
-  const target = warmup
-    ? previousSameType[todaySameType.length] || todaySameType.at(-1) || previousSameType[0] || previousAny.at(-1) || null
-    : todaySameType.at(-1) || previousSameType[0] || previousAny.at(-1) || null;
+  const target = previousSameType[todaySameType.length]
+    || todaySameType.at(-1)
+    || previousSameType[0]
+    || previousAny.at(-1)
+    || null;
   return {
     weight: target ? String(target.weight) : fallback.weight || "",
     reps: target ? String(target.reps) : fallback.reps || "8",
-    reserve: target ? reserveValue(target) : fallback.reserve ?? (warmup ? 6 : 2),
+    reserve: fallback.reserve ?? "",
     warmup
   };
 }
@@ -1271,8 +1290,8 @@ function render() {
   routeTransition = "";
   const app = document.querySelector("#app");
   app.innerHTML = `
-    <div class="shell">
-      <header class="topbar">
+    <div class="shell ${route.name === "exercise" ? "exercise-shell" : ""}">
+      ${route.name === "exercise" ? "" : `<header class="topbar">
         <button class="brand" data-action="home" aria-label="На главную">
           <span class="brand-mark">${currentLanguage === "et" ? "T" : "Ж"}</span>
           <span><strong>Силовой журнал</strong><small>локально на устройстве</small></span>
@@ -1281,7 +1300,7 @@ function render() {
           <button class="language-switch" data-action="language" aria-label="Текущий язык: ${currentLanguage === "et" ? "эстонский" : "русский"}">${currentLanguage.toUpperCase()}</button>
           <button class="install-button" data-action="install" hidden>Установить</button>
         </div>
-      </header>
+      </header>`}
       <main class="${transitionClass}">${renderRoute()}</main>
       ${editingExerciseId ? renderExerciseEditor() : ""}
       ${coachSheetOpen && coachRecommendation ? renderCoachSheet() : ""}
@@ -1510,33 +1529,7 @@ function renderExercise(exerciseId) {
   const exercise = state.exercises.find((item) => item.id === exerciseId);
   if (!exercise) return `<section class="panel"><h1>Упражнение не найдено</h1></section>`;
   const isCardio = isCardioExercise(exercise);
-  const allSets = setsForExercise(exerciseId);
-  const todaySets = allSets.filter((set) => dayKey(set.createdAt) === dayKey(Date.now()));
-  const sessions = progressForExercise(exerciseId);
-  const last = sessions.at(-1);
-  const previous = sessions.at(-2);
   const editingSet = state.sets.find((set) => set.id === editingSetId && set.exerciseId === exerciseId);
-  const todayWorkSets = todaySets.filter((set) => !isCardioSet(set) && !set.warmup);
-  const e1rmDelta = !isCardio && last && previous && last.bestSessionE1RM && previous.bestSessionE1RM
-    ? last.bestSessionE1RM - previous.bestSessionE1RM
-    : null;
-  const cardioDelta = isCardio && last && previous ? last.score - previous.score : null;
-  const hasRecentComparison = isCardio ? cardioDelta != null : e1rmDelta != null;
-  const recentComparison = hasRecentComparison
-    ? {
-        label: isCardio ? "Индекс: последние 2 тренировки" : "Расч. максимум: последние 2 тренировки",
-        value: isCardio
-          ? `${formatDate(previous.date)} ${formatWeight(previous.score)} → ${formatDate(last.date)} ${formatWeight(last.score)} (${cardioDelta >= 0 ? "+" : "−"}${formatWeight(Math.abs(cardioDelta))})`
-          : `${formatDate(previous.date)} ${formatWeight(previous.bestSessionE1RM)} кг → ${formatDate(last.date)} ${formatWeight(last.bestSessionE1RM)} кг (${e1rmDelta >= 0 ? "+" : "−"}${formatWeight(Math.abs(e1rmDelta))} кг)`,
-        delta: isCardio ? cardioDelta : e1rmDelta
-      }
-    : last
-      ? {
-          label: "Пока записана 1 тренировка",
-          value: `${formatDate(last.date)} ${isCardio ? formatWeight(last.score) : `${formatWeight(last.bestSessionE1RM)} кг`} · Сравнение появится после следующей тренировки`,
-          delta: null
-        }
-      : { label: "Истории пока нет", value: "Сравнение появится после второй тренировки", delta: null };
   const formValues = editingSet
     ? {
         weight: String(editingSet.weight),
@@ -1547,27 +1540,35 @@ function renderExercise(exerciseId) {
       }
     : { ...draftSet, note: draftNote };
   return `
-    <section class="exercise-header">
-      <button data-action="app-back" class="ghost">← Назад</button>
-      <div class="exercise-title">
-        <div class="exercise-icon large">${iconHtml(exercise)}</div>
-        <div><h1>${exercise.name}</h1><p>${label(categories, exercise.category)} · ${label(equipment, exercise.equipmentType)}</p></div>
-      </div>
-      <button data-action="edit-exercise" data-id="${exercise.id}">Править</button>
-    </section>
-    <section class="metrics-row">
-      <div><span>Сегодня</span><strong>${isCardio ? todaySets.length : todayWorkSets.length ? `${todayWorkSets.length} раб.` : "0"}</strong></div>
-      <div><span>${isCardio ? "Всего сегодня" : "Расч. максимум"}</span><strong>${isCardio ? formatDuration(todaySets.reduce((sum, set) => sum + cardioDurationSec(set), 0)) : last?.bestSessionE1RM ? `${formatWeight(last.bestSessionE1RM)} кг` : "—"}</strong></div>
-      <div class="${recentComparison.delta == null ? "" : recentComparison.delta >= 0 ? "good" : "bad"}"><span>${recentComparison.label}</span><strong>${recentComparison.value}</strong></div>
-    </section>
-    ${renderTodayExerciseSwitcher(exerciseId)}
-    ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues, previous)}
-    <section class="panel">
-      <div class="section-head"><h2>Подходы сегодня</h2><span>${formatDate(Date.now())}</span></div>
-      ${todaySets.length ? `<div class="sets-list today-sets">${todaySets.map((set, index) => isCardioSet(set) ? renderSetRow(set) : renderTodayStrengthSetRow(set, index)).join("")}</div>` : `<p class="muted">Сегодня по этому упражнению ещё нет подходов.</p>`}
-    </section>
-    ${renderCompactProgressCard(exercise)}
+    <header class="workout-header">
+      <button data-action="app-back" class="workout-back" aria-label="Назад">←</button>
+      <div><h1>${exercise.name}</h1><span>${label(equipment, exercise.equipmentType)}</span></div>
+      <button data-action="toggle-exercise-menu" class="workout-menu-button" aria-label="Другие действия" aria-expanded="${exerciseMenuOpen}">•••</button>
+    </header>
+    ${exerciseMenuOpen ? renderExerciseMenu(exercise, Boolean(editingSet)) : ""}
+    ${isCardio ? renderCardioEntry(exercise, editingSet) : renderStrengthEntry(exercise, editingSet, formValues)}
   `;
+}
+
+function renderExerciseMenu(exercise, editing = false) {
+  const supportsCoach = coachSupported(exercise);
+  return `
+    <div class="exercise-action-menu">
+      ${!editing && supportsCoach ? `<button type="button" data-action="open-coach">Тренер</button>` : ""}
+      ${!isCardioExercise(exercise) ? `<button type="button" data-action="toggle-strength-options">${strengthOptionsOpen ? "Скрыть варианты" : "Другие варианты"}</button>` : ""}
+      <button type="button" data-action="progress-exercise" data-id="${exercise.id}">Прогресс</button>
+      <button type="button" data-action="history">История</button>
+      <button type="button" data-action="edit-exercise" data-id="${exercise.id}">Править</button>
+    </div>
+    ${strengthOptionsOpen ? renderStrengthOptions(exercise.id) : ""}
+  `;
+}
+
+function renderStrengthOptions(exerciseId) {
+  const previousSets = previousWorkoutSets(exerciseId).filter((set) => !isCardioSet(set));
+  return `<div class="strength-options workout-secondary-options">
+    ${previousSets.length ? previousSets.map((set, index) => `<button type="button" data-action="apply-set-chip" data-weight="${set.weight}" data-reps="${set.reps}" data-reserve="" data-warmup="${Boolean(set.warmup)}"><small>${index + 1}</small>${formatWeight(set.weight)} × ${set.reps}<span>${set.warmup ? "разминка" : `RIR ${reserveValue(set)}`}</span></button>`).join("") : `<p class="muted">Прошлой тренировки пока нет.</p>`}
+  </div>`;
 }
 
 function renderTodayExerciseSwitcher(currentExerciseId) {
@@ -1580,38 +1581,58 @@ function renderTodayExerciseSwitcher(currentExerciseId) {
   }).join("")}</div></section>`;
 }
 
-function renderStrengthEntry(exercise, editingSet, formValues, previous) {
+function renderStrengthEntry(exercise, editingSet, formValues) {
   const invalid = validateStrengthDraft(formValues);
-  const workNumber = strengthSetNumber(exercise.id, false, editingSet);
-  const warmupNumber = strengthSetNumber(exercise.id, true, editingSet);
   const weightIncrement = exerciseCoachDefaults(exercise).increment;
+  const todaySets = todayStrengthSets(exercise.id);
+  const selectedRir = formValues.reserve === "" || formValues.reserve == null ? "" : Number(formValues.reserve);
   return `
-    <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
-      ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
-      ${renderStrengthQuickChips(exercise.id, previous, Boolean(editingSet))}
+    <form class="set-entry workout-console ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="strength">
+      ${editingSet ? `<div class="edit-banner"><strong>Редактирование подхода</strong><div><button type="button" data-action="delete-set" data-id="${editingSet.id}">Удалить</button><button type="button" data-action="cancel-edit">Отмена</button></div></div>` : ""}
+      ${renderCurrentSetCue(exercise.id, formValues, editingSet)}
       <div class="set-type-switch" role="group" aria-label="Тип подхода">
-        <button type="button" data-action="set-type" data-warmup="false" class="${formValues.warmup ? "" : "active"}" aria-pressed="${!formValues.warmup}"><span>Рабочий</span><small>№${workNumber}</small></button>
-        <button type="button" data-action="set-type" data-warmup="true" class="${formValues.warmup ? "active" : ""}" aria-pressed="${formValues.warmup}"><span>Разминка</span><small>№${warmupNumber}</small></button>
+        <button type="button" data-action="set-type" data-warmup="false" class="${formValues.warmup ? "" : "active"}" aria-pressed="${!formValues.warmup}">Рабочий</button>
+        <button type="button" data-action="set-type" data-warmup="true" class="${formValues.warmup ? "active" : ""}" aria-pressed="${formValues.warmup}">Разминка</button>
         <input type="checkbox" name="warmup" ${formValues.warmup ? "checked" : ""} hidden />
       </div>
-      <div class="input-pair">
-        <label class="number-control"><span>Вес вместе со штангой</span><div><button type="button" data-step-field="weight" data-delta="-${weightIncrement}">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="80" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="${weightIncrement}">+</button></div></label>
+      <div class="input-pair workout-values">
+        <label class="number-control"><span>Вес <small>${state.settings.unit}</small></span><div><button type="button" data-step-field="weight" data-delta="-${weightIncrement}" aria-label="Уменьшить вес">−</button><input inputmode="${nativeKeyboard ? "decimal" : "none"}" name="weight" min="1" required value="${formValues.weight}" placeholder="—" ${nativeKeyboard ? "" : "readonly"} data-set-field="weight" class="${activeSetField === "weight" ? "active" : ""}" /><button type="button" data-step-field="weight" data-delta="${weightIncrement}" aria-label="Увеличить вес">+</button></div></label>
         <label class="number-control"><span>Повторы</span><div><button type="button" data-step-field="reps" data-delta="-1">−</button><input inputmode="${nativeKeyboard ? "numeric" : "none"}" name="reps" min="1" required value="${formValues.reps}" placeholder="8" ${nativeKeyboard ? "" : "readonly"} data-set-field="reps" class="${activeSetField === "reps" ? "active" : ""}" /><button type="button" data-step-field="reps" data-delta="1">+</button></div></label>
       </div>
       ${keypadOpen ? renderKeypad() : ""}
-      <div class="rir-select-row">
-        <label class="rir-select"><span><strong>RIR</strong><small>повторов в запасе</small></span><select name="reserve" aria-label="RIR — повторов в запасе">${Array.from({ length: 11 }, (_, value) => `<option value="${value}" ${Number(formValues.reserve) === value ? "selected" : ""}>${value} — ${value === 0 ? "отказ" : "в запасе"}</option>`).join("")}</select></label>
-        <button class="inline-help rir-help-toggle" type="button" data-action="toggle-rir-help" aria-label="Что такое RIR?" aria-expanded="${rirHelpOpen}">?</button>
+      <div class="rir-control">
+        <div><strong>RIR</strong><span>повторов в запасе</span></div>
+        <input type="hidden" name="reserve" value="${selectedRir}">
+        <div class="rir-chips" role="group" aria-label="RIR — повторов в запасе">
+          ${[0, 1, 2, 3, 4].map((value) => `<button type="button" data-rir-value="${value}" class="${selectedRir === value ? "active" : ""}" aria-pressed="${selectedRir === value}">${value === 4 ? "4+" : value}</button>`).join("")}
+        </div>
       </div>
-      ${rirHelpOpen ? `<div class="context-help"><strong>Что такое RIR?</strong><span>Сколько повторений можно было бы сделать дополнительно. 0 — отказ, 3 — осталось примерно три повтора.</span></div>` : ""}
-      ${renderPreviousWorkReference(exercise.id)}
-      <p class="muted warmup-note">${formValues.warmup ? "Разминка не влияет на прогресс." : "Рабочий подход влияет на прогресс."}</p>
-      ${renderSetComparison(exercise.id, formValues)}
-      <label class="set-note">Заметка <span>необязательно</span><textarea name="note" rows="2" placeholder="Например: техника, самочувствие, высота сиденья">${formValues.note || ""}</textarea></label>
-      ${formError || invalid ? `<p class="form-error">${formError || invalid}</p>` : ""}
+      <button class="note-toggle" type="button" data-action="toggle-note">${noteOpen || formValues.note ? "Скрыть заметку" : "+ Добавить заметку"}</button>
+      ${noteOpen || formValues.note ? `<label class="set-note compact-note"><textarea name="note" rows="2" placeholder="Техника, самочувствие, настройка">${formValues.note || ""}</textarea></label>` : `<input type="hidden" name="note" value="">`}
+      ${formError ? `<p class="form-error">${formError}</p>` : ""}
       <button class="primary save-set" type="submit" ${invalid ? "disabled" : ""}>${editingSet ? "Сохранить изменения" : "Записать подход"}</button>
+      ${renderTodayWorkoutSets(todaySets)}
     </form>
   `;
+}
+
+function renderCurrentSetCue(exerciseId, formValues, editingSet) {
+  const warmup = Boolean(formValues.warmup);
+  const index = editingSet
+    ? Math.max(0, strengthSetNumber(exerciseId, warmup, editingSet) - 1)
+    : todayStrengthIndex(exerciseId, warmup);
+  const target = previousStrengthSets(exerciseId, warmup)[index];
+  if (!target) return `<div class="set-cue empty"><span>${warmup ? "Разминка" : "Рабочий"} №${index + 1}</span><small>без прошлого ориентира</small></div>`;
+  return `<button class="set-cue" type="button" data-action="apply-set-comparison" data-weight="${target.weight}" data-reps="${target.reps}" data-reserve="" data-warmup="${warmup}" aria-label="Подставить прошлый подход">
+    <span>Прошлый №${index + 1}: <strong>${formatWeight(target.weight)} ${state.settings.unit} × ${target.reps}</strong> · RIR ${reserveValue(target)}</span><small>Подставить</small>
+  </button>`;
+}
+
+function renderTodayWorkoutSets(sets) {
+  return `<section class="today-workout-sets">
+    <div class="today-workout-head"><strong>Сегодня</strong><span>${sets.length}</span></div>
+    ${sets.length ? `<div>${sets.map((set, index) => renderTodayStrengthSetRow(set, index)).join("")}</div>` : `<p>Записанных подходов пока нет</p>`}
+  </section>`;
 }
 
 function strengthSetNumber(exerciseId, warmup, editingSet) {
@@ -1646,8 +1667,9 @@ function renderCardioEntry(exercise, editingSet) {
     : { ...draftCardio, note: draftNote };
   const rowing = isRowingExercise(exercise);
   const elliptical = isEllipticalExercise(exercise);
+  const todaySets = setsForExercise(exercise.id).filter((set) => isCardioSet(set) && dayKey(set.createdAt) === dayKey(Date.now()));
   return `
-    <form class="set-entry ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="cardio">
+    <form class="set-entry workout-console cardio-console ${editingSet ? "editing" : ""}" data-form="set" data-id="${exercise.id}" data-kind="cardio">
       ${editingSet ? `<div class="edit-banner"><strong>Редактирование кардио</strong><button type="button" data-action="cancel-edit">Отмена</button></div>` : ""}
       <div class="quick-row">
         ${rowing ? `<button type="button" data-action="cardio-distance" data-distance="3000">3000 м тест</button><button type="button" data-action="cardio-setting" data-setting="9">Заслонка 9</button>` : ""}
@@ -1663,16 +1685,20 @@ function renderCardioEntry(exercise, editingSet) {
         <label class="number-control"><span>Дистанция, м</span><input inputmode="numeric" name="distanceM" min="1" required value="${values.distanceM}" placeholder="${rowing ? "3000" : "1500"}" /></label>
         <label class="number-control cardio-setting"><span>Настройка тренажёра</span><input inputmode="decimal" name="setting" value="${values.setting || ""}" placeholder="например 9" /></label>
       </div>
-      <div class="cardio-context">
-        ${rowing ? `<strong>Гребля</strong><span>3000 м - быстрый пресет для рабочего фит-теста, обычные тренировки можно писать с любой дистанцией.</span><span>${rowNormsText()}</span><span>Настройка тренажёра сохраняется только в истории и не участвует в расчёте прогресса.</span>` : ""}
-        ${elliptical ? `<strong>Эллипс: спокойное кардио</strong><span>Здесь важны время, дистанция и ровная привычка разогрева, без оценки тяжести.</span>` : ""}
-        ${!rowing && !elliptical ? `<span>Настройка сохраняется как контекст. Она не считается сложностью и не влияет на прогресс.</span>` : ""}
-      </div>
-      <label class="set-note">Заметка <span>необязательно</span><textarea name="note" rows="2" placeholder="Например: самочувствие или настройка">${values.note || ""}</textarea></label>
+      <button class="note-toggle" type="button" data-action="toggle-note">${noteOpen || values.note ? "Скрыть заметку" : "+ Добавить заметку"}</button>
+      ${noteOpen || values.note ? `<label class="set-note compact-note"><textarea name="note" rows="2" placeholder="Самочувствие или настройка">${values.note || ""}</textarea></label>` : `<input type="hidden" name="note" value="">`}
       ${formError ? `<p class="form-error">${formError}</p>` : ""}
       <button class="primary save-set" type="submit">${editingSet ? "Сохранить изменения" : "Записать кардио"}</button>
+      ${renderTodayCardioSets(todaySets)}
     </form>
   `;
+}
+
+function renderTodayCardioSets(sets) {
+  return `<section class="today-workout-sets">
+    <div class="today-workout-head"><strong>Сегодня</strong><span>${sets.length}</span></div>
+    ${sets.length ? `<div>${sets.map((set, index) => `<button type="button" class="workout-set-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}"><span class="set-index">${index + 1}</span><strong>${formatDuration(cardioDurationSec(set))}</strong><span class="set-kind">${formatDistanceMeters(cardioDistanceM(set))}${set.setting ? ` · ${set.setting}` : ""}</span><span class="edit-glyph">›</span></button>`).join("")}</div>` : `<p>Записанных подходов пока нет</p>`}
+  </section>`;
 }
 
 function renderSetComparison(exerciseId, formValues) {
@@ -1716,10 +1742,11 @@ function renderSetComparison(exerciseId, formValues) {
 }
 
 function strengthFormValues(form) {
+  const reserve = form.elements.reserve?.value ?? "";
   return {
     weight: form.elements.weight?.value || "",
     reps: form.elements.reps?.value || "",
-    reserve: Number(form.elements.reserve?.value || 0),
+    reserve: reserve === "" ? "" : Number(reserve),
     warmup: Boolean(form.elements.warmup?.checked)
   };
 }
@@ -1739,10 +1766,15 @@ function updateStrengthComparison(root) {
 }
 
 function syncReserveUi(root, reserve) {
-  const value = Number(reserve);
+  const value = reserve === "" || reserve == null ? "" : Number(reserve);
   const form = root.querySelector("[data-form='set'][data-kind='strength']");
   if (!form) return;
   if (form.elements.reserve) form.elements.reserve.value = value;
+  form.querySelectorAll("[data-rir-value]").forEach((button) => {
+    const active = value !== "" && Number(button.dataset.rirValue) === Number(value);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function finishSetEditing() {
@@ -1762,14 +1794,10 @@ function applySuggestedStrengthValues(root) {
   const form = root.querySelector("[data-form='set'][data-kind='strength']");
   if (!form) return;
   const warmup = Boolean(form.elements.warmup?.checked);
-  const currentReserve = Number(form.elements.reserve?.value || 0);
-  const reserve = warmup
-    ? Math.max(6, currentReserve || 6)
-    : currentReserve >= 6 ? 2 : currentReserve || 2;
   const suggestion = suggestedDraftSet(form.dataset.id, {
     weight: form.elements.weight?.value || "",
     reps: form.elements.reps?.value || "8",
-    reserve,
+    reserve: "",
     warmup
   });
   form.elements.weight.value = suggestion.weight;
@@ -1815,9 +1843,10 @@ function renderSetRow(set) {
 function validateStrengthDraft(values) {
   const weight = Number(String(values.weight || "").replace(",", "."));
   const reps = Number(values.reps || 0);
-  const reserve = Number(values.reserve);
   if (!Number.isFinite(weight) || weight <= 0) return "Вес должен быть больше 0";
   if (!Number.isInteger(reps) || reps <= 0) return "Повторы должны быть больше 0";
+  if (values.reserve === "" || values.reserve == null) return "Укажите RIR";
+  const reserve = Number(values.reserve);
   if (!Number.isFinite(reserve) || reserve < 0) return "Запас должен быть 0 или больше";
   return "";
 }
@@ -1831,17 +1860,13 @@ function rirIntensity(value) {
 }
 
 function renderTodayStrengthSetRow(set, index) {
-  const valid = validE1rmSet(set);
-  const score = valid ? estimatedE1rm(set) : null;
   return `
-    <div class="set-row strength-today ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="use-set" data-id="${set.id}">
-      <strong>${index + 1}. ${set.warmup ? "Разм." : "Раб."} ${formatWeight(set.weight)} × ${set.reps} · <span class="rir-badge">RIR ${reserveValue(set)}</span></strong>
-      <span>${rirIntensity(reserveValue(set))}${set.warmup ? "" : valid ? ` · e1RM ${formatWeight(score)}` : " · e1RM не считается: reps + RIR > 15"} · ${formatDateTime(set.createdAt)}${set.note ? ` · ${set.note}` : ""}</span>
-      <div class="set-actions">
-        <button data-action="edit-set" data-id="${set.id}" aria-label="Редактировать подход">✎</button>
-        <button data-action="delete-set" data-id="${set.id}" aria-label="Удалить подход">×</button>
-      </div>
-    </div>
+    <button type="button" class="workout-set-row ${set.id === lastTouchedSetId ? "just-saved" : ""}" data-action="edit-set" data-id="${set.id}" aria-label="Редактировать подход ${index + 1}">
+      <span class="set-index">${index + 1}</span>
+      <strong>${formatWeight(set.weight)} × ${set.reps}</strong>
+      <span class="set-kind">${set.warmup ? "разминка" : `RIR ${reserveValue(set)}`}${set.note ? " · ✎" : ""}</span>
+      <span class="edit-glyph" aria-hidden="true">›</span>
+    </button>
   `;
 }
 
@@ -1960,7 +1985,8 @@ function applyStrengthPreset(root, source) {
   if (!form) return;
   form.elements.weight.value = source.dataset.weight;
   form.elements.reps.value = source.dataset.reps;
-  form.elements.reserve.value = source.dataset.reserve;
+  const reserve = source.dataset.reserve === "" || source.dataset.reserve == null ? "" : Number(source.dataset.reserve);
+  form.elements.reserve.value = reserve;
   if (source.dataset.warmup != null) form.elements.warmup.checked = source.dataset.warmup === "true";
   form.querySelectorAll("[data-action='set-type']").forEach((typeButton) => {
     const active = typeButton.dataset.warmup === String(form.elements.warmup.checked);
@@ -1972,14 +1998,21 @@ function applyStrengthPreset(root, source) {
       ...draftSet,
       weight: source.dataset.weight,
       reps: source.dataset.reps,
-      reserve: Number(source.dataset.reserve),
+      reserve,
       warmup: form.elements.warmup.checked
     };
   }
   strengthDraftDirty = false;
   pendingSuggestionType = null;
-  syncReserveUi(root, Number(source.dataset.reserve));
+  syncReserveUi(root, reserve);
+  refreshStrengthValidity(form);
   updateStrengthComparison(root);
+}
+
+function refreshStrengthValidity(form) {
+  const button = form?.querySelector(".save-set");
+  if (!button) return;
+  button.disabled = Boolean(validateStrengthDraft(strengthFormValues(form)));
 }
 
 function renderMiniProgress(exerciseId) {
@@ -2903,6 +2936,12 @@ function bindEvents(root) {
     if (text) text.textContent = input.files?.[0]?.name || localizeText("Выбрать файл");
   }));
   root.querySelector("[data-form='set']")?.addEventListener("submit", saveSet);
+  root.querySelector("[data-action='toggle-exercise-menu']")?.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set'][data-kind='strength']");
+    if (form && !editingSetId) rememberStrengthForm(form);
+    exerciseMenuOpen = !exerciseMenuOpen;
+    render();
+  });
   root.querySelector("[data-action='toggle-strength-options']")?.addEventListener("click", () => {
     const form = root.querySelector("[data-form='set'][data-kind='strength']");
     if (form && !editingSetId) rememberStrengthForm(form);
@@ -2916,6 +2955,12 @@ function bindEvents(root) {
     const form = root.querySelector("[data-form='set'][data-kind='strength']");
     if (form && !editingSetId) rememberStrengthForm(form);
     rirHelpOpen = !rirHelpOpen;
+    render();
+  });
+  root.querySelector("[data-action='toggle-note']")?.addEventListener("click", () => {
+    const form = root.querySelector("[data-form='set']");
+    if (form && !editingSetId) rememberCurrentExerciseDraft();
+    noteOpen = !noteOpen;
     render();
   });
   root.querySelectorAll("[data-action='set-type']").forEach((button) => button.addEventListener("click", () => {
@@ -2940,6 +2985,18 @@ function bindEvents(root) {
     syncReserveUi(root, Number(event.target.value));
     updateStrengthComparison(root);
   });
+  root.querySelectorAll("[data-rir-value]").forEach((button) => button.addEventListener("click", () => {
+    const form = button.closest("[data-form='set'][data-kind='strength']");
+    if (!form) return;
+    const value = Number(button.dataset.rirValue);
+    form.elements.reserve.value = value;
+    if (!editingSetId) draftSet.reserve = value;
+    strengthDraftDirty = true;
+    pendingSuggestionType = null;
+    syncReserveUi(root, value);
+    refreshStrengthValidity(form);
+    haptic(8);
+  }));
   root.querySelector("[name='warmup']")?.addEventListener("change", (event) => {
     const warmup = event.target.checked;
     if (!editingSetId) draftSet.warmup = warmup;
@@ -2970,6 +3027,7 @@ function bindEvents(root) {
       if (!editingSetId) draftSet[input.dataset.setField] = input.value;
       strengthDraftDirty = true;
       pendingSuggestionType = null;
+      refreshStrengthValidity(input.closest("form"));
       updateStrengthComparison(root);
     });
     input.addEventListener("pointerdown", () => {
@@ -2996,6 +3054,7 @@ function bindEvents(root) {
     if (!editingSetId) draftSet[button.dataset.stepField] = input.value;
     strengthDraftDirty = true;
     pendingSuggestionType = null;
+    refreshStrengthValidity(input.closest("form"));
     updateStrengthComparison(root);
   }));
   root.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click", () => {
@@ -3290,7 +3349,8 @@ function saveSet(event) {
   }
   const weight = Number(String(data.get("weight")).replace(",", "."));
   const reps = Number(data.get("reps"));
-  const reserve = Number(data.get("reserve"));
+  const reserveRaw = data.get("reserve");
+  const reserve = reserveRaw === "" || reserveRaw == null ? "" : Number(reserveRaw);
   const warmup = data.get("warmup") === "on";
   const validation = validateStrengthDraft({ weight: data.get("weight"), reps: data.get("reps"), reserve, warmup });
   if (validation) {
@@ -3333,11 +3393,12 @@ function saveSet(event) {
       createdAt: Date.now()
     });
     lastTouchedSetId = id;
-    draftSet = suggestedDraftSet(form.dataset.id, { weight: String(weight), reps: String(reps), reserve, warmup });
+    draftSet = suggestedDraftSet(form.dataset.id, { weight: String(weight), reps: String(reps), reserve: "", warmup });
     strengthDraftDirty = false;
     pendingSuggestionType = null;
     keypadOpen = false;
     draftNote = "";
+    noteOpen = false;
     notify(warmup ? "Разминка записана" : "Подход записан", "success");
     showUndo({ kind: "delete", setId: id, message: warmup ? "Разминка записана" : "Подход записан" });
   }

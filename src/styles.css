@@ -3210,3 +3210,387 @@ h1 {
     padding: 16px;
   }
 }
+
+/* Exercise screen: compact, touch-first workout console. */
+.exercise-shell {
+  width: min(100%, 680px);
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: max(8px, env(safe-area-inset-top)) 10px calc(82px + env(safe-area-inset-bottom));
+}
+
+.exercise-shell > main {
+  display: grid;
+  gap: 8px;
+}
+
+.workout-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+}
+
+.workout-header > div {
+  min-width: 0;
+  text-align: center;
+}
+
+.workout-header h1 {
+  overflow: hidden;
+  margin: 0;
+  font-size: clamp(1.05rem, 5vw, 1.3rem);
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workout-header span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.workout-back,
+.workout-menu-button {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  font-size: 1.35rem;
+}
+
+.workout-menu-button {
+  letter-spacing: 0.08em;
+}
+
+.exercise-action-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.exercise-action-menu button {
+  flex: 1 1 auto;
+  min-height: 42px;
+  padding: 8px 12px;
+}
+
+.workout-secondary-options {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.workout-console {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.workout-console .edit-banner > div {
+  display: flex;
+  gap: 6px;
+}
+
+.workout-console .edit-banner button {
+  min-height: 40px;
+}
+
+.set-cue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: inherit;
+  text-align: left;
+}
+
+.set-cue span {
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-cue small {
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.set-cue.empty small {
+  color: var(--muted);
+}
+
+.workout-console .set-type-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.workout-console .set-type-switch button {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+}
+
+.workout-console .set-type-switch button.active {
+  background: var(--surface);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+  color: var(--primary);
+}
+
+.workout-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.workout-values .number-control {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workout-values .number-control > span {
+  padding-inline: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.workout-values .number-control > span small {
+  color: inherit;
+  font-weight: 600;
+}
+
+.workout-values .number-control > div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: stretch;
+  overflow: hidden;
+  min-height: 66px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.workout-values .number-control button {
+  min-width: 48px;
+  min-height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 1.65rem;
+}
+
+.workout-values .number-control input {
+  width: 100%;
+  min-width: 0;
+  height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: clamp(1.55rem, 8vw, 2.15rem);
+  font-weight: 900;
+  text-align: center;
+}
+
+.workout-values .number-control input.active {
+  outline: 2px solid color-mix(in srgb, var(--primary) 62%, transparent);
+  outline-offset: -3px;
+}
+
+.rir-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.rir-control > div:first-child {
+  display: grid;
+  min-width: 58px;
+}
+
+.rir-control > div:first-child strong {
+  font-size: 0.9rem;
+}
+
+.rir-control > div:first-child span {
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 1.1;
+}
+
+.rir-chips {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+}
+
+.rir-chips button {
+  min-width: 0;
+  min-height: 46px;
+  padding: 0;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.rir-chips button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-contrast, #fff);
+}
+
+.note-toggle {
+  justify-self: start;
+  min-height: 32px;
+  padding: 3px 5px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.compact-note textarea {
+  min-height: 58px;
+}
+
+.workout-console .form-error {
+  margin: -2px 0;
+  font-size: 0.75rem;
+}
+
+.workout-console .save-set {
+  width: 100%;
+  min-height: 54px;
+  margin: 0;
+  border-radius: 14px;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.today-workout-sets {
+  display: grid;
+  gap: 2px;
+  padding-top: 3px;
+  border-top: 1px solid var(--line);
+}
+
+.today-workout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 4px;
+  font-size: 0.8rem;
+}
+
+.today-workout-head span,
+.today-workout-sets > p {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.today-workout-sets > p {
+  margin: 4px;
+}
+
+.today-workout-sets > div:last-child {
+  max-height: 176px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.workout-set-row {
+  display: grid;
+  grid-template-columns: 28px minmax(82px, 0.7fr) minmax(92px, 1fr) 18px;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.workout-set-row .set-index,
+.workout-set-row .set-kind,
+.workout-set-row .edit-glyph {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.workout-set-row strong {
+  font-size: 0.9rem;
+}
+
+.workout-set-row .set-kind {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workout-set-row .edit-glyph {
+  font-size: 1.2rem;
+  text-align: right;
+}
+
+@media (max-width: 380px) {
+  .exercise-shell {
+    padding-inline: 7px;
+  }
+
+  .workout-console {
+    padding: 8px;
+  }
+
+  .workout-values .number-control > div {
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+  }
+
+  .workout-values .number-control button {
+    min-width: 42px;
+  }
+
+  .rir-control {
+    gap: 6px;
+  }
+
+  .rir-control > div:first-child {
+    min-width: 48px;
+  }
+}
